@@ -25,6 +25,14 @@ function logParentTheme() {
 }
 
 
+function refreshPresetList() {
+    SqueezeDSPGetList(function(data) {
+        LocalBuildList('Preset', data);
+    });
+}
+
+
+
 function LocalBuildLists(data) {
     LocalBuildList('FIRWavFile', data);
     LocalBuildList('Preset', data);
@@ -498,3 +506,132 @@ function initializeTouchProtection() {
         });
     }
 }
+
+
+// ── Kebab mini-menu ──────────────────────────────────────────────────────────
+
+(function () {
+    // One shared menu element, created once
+    var _menu = null;
+    var _dismissHandler = null;
+
+    function getMenu() {
+        if (_menu) return _menu;
+
+        _menu = document.createElement('div');
+        _menu.id = 'sqdsp-preset-menu';
+        _menu.style.cssText = [
+            'position:absolute',
+            'z-index:9999',
+            'background:var(--sq-bg, #2a2a2a)',
+            'border:1px solid var(--sq-border, #555)',
+            'border-radius:4px',
+            'box-shadow:0 2px 8px rgba(0,0,0,0.45)',
+            'min-width:130px',
+            'padding:4px 0',
+            'display:none',
+            'font-size:0.9em',
+        ].join(';');
+        document.body.appendChild(_menu);
+        return _menu;
+    }
+
+    function closeMenu() {
+        var m = getMenu();
+        m.style.display = 'none';
+        if (_dismissHandler) {
+            document.removeEventListener('pointerdown', _dismissHandler, true);
+            _dismissHandler = null;
+        }
+    }
+
+    function menuItem(label, cssClass, action) {
+        var li = document.createElement('div');
+        li.textContent = label;
+        li.style.cssText = [
+            'padding:7px 14px',
+            'cursor:pointer',
+            'white-space:nowrap',
+            'color:' + (cssClass === 'danger'
+                ? 'var(--sq-red,#e05555)'
+                : 'var(--sq-text,#ddd)'),
+        ].join(';');
+        li.addEventListener('pointerover', function () {
+            li.style.background = 'var(--sq-hover,#3a3a3a)';
+        });
+        li.addEventListener('pointerout', function () {
+            li.style.background = '';
+        });
+        li.addEventListener('pointerdown', function (e) {
+            e.stopPropagation();   // don't trigger the dismiss handler
+            closeMenu();
+            action();
+        });
+        return li;
+    }
+
+function openPresetMenu(anchorEl) {
+    var presetName = document.getElementById('sel_Preset').value;
+    var m = getMenu();
+    m.innerHTML = '';
+
+    // ── menu items ──────────────────────────────────────────────────────
+    m.appendChild(menuItem('🗑 Delete preset', 'danger', function () {
+        // --- REAL DELETE LOGIC (copied from old version) ---
+        if (!presetName || presetName === '-') {
+            DisplayAlert('Preset', 'No preset selected', 1500);
+            return;
+        }
+        if (!confirm('Delete preset "' + presetName + '"?')) return;
+
+        SqueezeDSPDeletePreset(presetName, function () {
+            // Remove option from the select
+            var sel = document.getElementById('sel_Preset');
+            for (var i = sel.options.length - 1; i >= 0; i--) {
+                if (sel.options[i].value === presetName) {
+                    sel.remove(i);
+                    break;
+                }
+            }
+            sel.value = '-';
+            DisplayAlert('Preset', 'Deleted', 2000);
+        });
+    }));
+
+    // ── position the menu (your new smart positioning) ──────────────
+    var rect = anchorEl.getBoundingClientRect();
+    var scrollX = window.scrollX || document.documentElement.scrollLeft;
+    var scrollY = window.scrollY || document.documentElement.scrollTop;
+
+    m.style.display = 'block';
+    var menuW = m.offsetWidth;
+    var menuH = m.offsetHeight;
+
+    var spaceBelow = window.innerHeight - rect.bottom;
+    var top = (spaceBelow >= menuH || spaceBelow >= rect.top)
+        ? rect.bottom + scrollY + 2
+        : rect.top  + scrollY  - menuH - 2;
+
+    var left = rect.left + scrollX;
+    if (rect.left + menuW > window.innerWidth) {
+        left = rect.right + scrollX - menuW;
+    }
+    if (left < scrollX + 5) {
+        left = scrollX + 5;
+    }
+
+    m.style.top  = top + 'px';
+    m.style.left = left + 'px';
+
+    // Dismiss handler
+    _dismissHandler = function (e) {
+        if (!m.contains(e.target) && e.target !== anchorEl) {
+            closeMenu();
+        }
+    };
+    document.addEventListener('pointerdown', _dismissHandler, true);
+}
+
+    // Expose for the HTML onclick
+    window.openPresetMenu = openPresetMenu;
+})();

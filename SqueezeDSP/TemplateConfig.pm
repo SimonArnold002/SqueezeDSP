@@ -6,10 +6,11 @@ package Plugins::SqueezeDSP::TemplateConfig;
 
 sub get_config_revision
 {
-	my $configrevision = "0.2.01";
+	my $configrevision = "0.2.02";
 	return $configrevision;
 }
 
+# 0.2.02 Added soc values for SpotOn plugin and amended dsf and dff to use pcm_s24le for 24 bit output, added wav16 output template for non-FLAC clients
 # 0.2.01 Amended all settings to use new SqueezeDSP adapter Eliminated wav16 replace with MP3
 # 0.1.11 corrected ogf line which had duplicate convolver app.
 # 0.1.10 added hls flc and wav
@@ -107,6 +108,10 @@ ops mp3 * $CLIENTID$
 	# IFB:{BITRATE=--abr %B}D:{RESAMPLE=--maxSampleRate=%d}
 	[sox] -q -t opus $FILE$ -t wav - |  [$CONVAPP$]  --trackURL=$URL$ $RESAMPLE$ --Clientid="$CLIENTID$"  --bitsout=24 --formatout=MP3
 
+soc mp3 * $CLIENTID$
+    # I
+    [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=24 --formatout=MP3
+
 spt mp3 * $CLIENTID$
 	# RT:{START=--start-position %s}
 	[spotty] -n Squeezebox -c "$CACHE$" --single-track $URL$ --bitrate 320 --disable-discovery --disable-audio-cache $START$  |  [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM  --trackURL=$URL$ --Clientid="$CLIENTID$"  --bitsout=24 --formatout=MP3
@@ -131,6 +136,110 @@ wvp mp3 * $CLIENTID$
 	# FT:{START=--skip=%t}U:{END=--until=%v}D:{RESAMPLE=--maxSampleRate=%d}
 	[wvunpack] $FILE$ -wq $START$ $END$ -o - |  [$CONVAPP$] --trackURL=$URL$ $RESAMPLE$ --Clientid="$CLIENTID$"  --bitsout=24 --formatout=MP3
 
+
+EOF1
+}
+
+
+sub template_WAV16
+{
+	return <<'EOF1';
+
+aac wav * $CLIENTID$
+	# IF
+	[faad] -q -w -f 2 $FILE$ |  [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+aif wav * $CLIENTID$
+	# I
+	 [$CONVAPP$] --input $FILE$ --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV 
+
+alc wav * $CLIENTID$
+	# FT:{START=-j %s}U:{END=-e %u}
+	[faad] -q -w -f 1 $START$ $END$ $FILE$ |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+alcx wav * $CLIENTID$
+	# FT:{START=-j %s}U:{END=-e %u}
+	[faad] -q -w -f 1 $START$ $END$ $FILE$  |  [$CONVAPP$]  --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+ape wav * $CLIENTID$
+	# F
+	[mac] $FILE$ - -d |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+dsf wav * $CLIENTID$
+	# FT:{START=-ss %s}U:{END=-to %u}
+	[ffmpeg] -loglevel quiet $START$ -i $FILE$  $END$ -ar 384000 -f wav - |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV 
+
+dff wav * $CLIENTID$
+	# FT:{START=-ss %s}U:{END=-to %u}
+	[ffmpeg] -loglevel quiet $START$ -i $FILE$ $END$ -ar 384000 -f wav - |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV 
+
+flc wav * $CLIENTID$
+	# IFT:{START=--skip=%t}U:{END=--until=%v}
+	[flac] -dcs --force-raw-format --endian=little --sign=signed $START$ $END$ -- $FILE$ |  [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+hls wav * $CLIENTID$
+	# RB:{BITRATE=-B %B}T:{START=-ss %s}
+	[ffmpeg] -loglevel quiet  -i $FILE$ -f s24le - |  [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --channels=$CHANNELS$ --formatin=PCM  --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+mov wav * $CLIENTID$
+	# FR
+	[mov123] $FILE$ |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+mp3 wav * $CLIENTID$
+	# IF
+	[lame] --mp3input --decode --silent $FILE$ - |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+mp4 wav * $CLIENTID$
+	# FT:{START=-j %s}U:{END=-e %u}
+	[faad] -q -w -f 1 $START$ $END$ $FILE$ |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+mp4x wav  * $CLIENTID$
+	# FT:{START=-j %s}U:{END=-e %u}
+	[faad] -q -w -f 1 $START$ $END$ $FILE$  |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+mpc wav * $CLIENTID$
+	# IR
+	[mppdec] --silent --prev --gain 3 - - |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+ogg wav * $CLIENTID$
+	# IFR
+	[sox] -t ogg $FILE$ -t wav  - |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+ogf wav * $CLIENTID$
+	# IFR
+	[flac] --ogg -dcs --force-raw-format --endian=little --sign=signed  -- $FILE$ |  [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+ops wav * $CLIENTID$
+	# IFB:{BITRATE=--abr %B}
+	[sox] -q -t opus $FILE$ -t wav - |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+soc wav * $CLIENTID$
+    # I
+    [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+spt wav * $CLIENTID$
+	# RT:{START=--start-position %s}
+	[spotty] -n Squeezebox -c "$CACHE$" --single-track $URL$ --bitrate 320 --disable-discovery --disable-audio-cache $START$  |  [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM  --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+wav wav * $CLIENTID$
+	# IF
+	 [$CONVAPP$] --input $FILE$ --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV 
+
+wma wav * $CLIENTID$
+	# FT:{START=-ss %t}U:{END=-to %v}
+	[ffmpeg] -loglevel quiet $START$ -i $FILE$ $END$ -f s24le - |  [$CONVAPP$] --bitsin=24 --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+wmal wav * $CLIENTID$
+	# FT:{START=-ss %t}U:{END=-to %v}
+	[ffmpeg] -loglevel quiet $START$ -i $FILE$ $END$ -f s24le - |  [$CONVAPP$] --bitsin=24 --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+wmap wav * $CLIENTID$
+	# FT:{START=-ss %t}U:{END=-to %v}
+	[ffmpeg] -loglevel quiet $START$ -i $FILE$ $END$ -f s24le - |  [$CONVAPP$] --bitsin=24 --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
+
+wvp wav * $CLIENTID$
+	# FT:{START=--skip=%t}U:{END=--until=%v}
+	[wvunpack] $FILE$ -wq $START$ $END$ -o - |  [$CONVAPP$] --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=16 --formatout=WAV
 
 EOF1
 }
@@ -162,11 +271,11 @@ ape flc * $CLIENTID$
 
 dsf flc * $CLIENTID$
 	# FT:{START=-ss %s}U:{END=-to %u}D:{RESAMPLE=--maxSampleRate=%d}
-	[ffmpeg] -loglevel quiet $START$ -i $FILE$  $END$ -ar 384000 -f wav - |  [$CONVAPP$] --trackURL=$URL$ $RESAMPLE$ --Clientid="$CLIENTID$" --bitsout=24 --formatout=FLC
+	[ffmpeg] -loglevel quiet $START$ -i $FILE$  $END$ -c:a pcm_s24le -ar 384000 -f wav - |  [$CONVAPP$] --trackURL=$URL$ $RESAMPLE$ --Clientid="$CLIENTID$" --bitsout=24 --formatout=FLC
 
 dff flc * $CLIENTID$
 	# FT:{START=-ss %s}U:{END=-to %u}D:{RESAMPLE=--maxSampleRate=%d}
-	[ffmpeg] -loglevel quiet $START$ -i $FILE$ $END$ -ar 384000 -f wav - |  [$CONVAPP$] --trackURL=$URL$ $RESAMPLE$ --Clientid="$CLIENTID$" --bitsout=24 --formatout=FLC
+	[ffmpeg] -loglevel quiet $START$ -i $FILE$ $END$  -c:a pcm_s24le -ar 384000 -f wav - |  [$CONVAPP$] --trackURL=$URL$ $RESAMPLE$ --Clientid="$CLIENTID$" --bitsout=24 --formatout=FLC
 
 flc flc * $CLIENTID$
 	# IFT:{START=--skip=%t}U:{END=--until=%v}D:{RESAMPLE=--maxSampleRate=%d}
@@ -207,6 +316,10 @@ ogf flc * $CLIENTID$
 ops flc * $CLIENTID$
 	# IFB:{BITRATE=--abr %B}D:{RESAMPLE=--maxSampleRate=%d}
 	[sox] -q -t opus $FILE$ -t wav - |  [$CONVAPP$]  --trackURL=$URL$ $RESAMPLE$ --Clientid="$CLIENTID$"  --bitsout=24 --formatout=FLC
+
+soc flc * $CLIENTID$
+    # I
+    [$CONVAPP$] --bitsin=$SAMPLESIZE$ --samplerate=$SAMPLERATE$ --be=false --channels=$CHANNELS$ --formatin=PCM --trackURL=$URL$ --Clientid="$CLIENTID$" --bitsout=24 --formatout=FLC
 
 spt flc * $CLIENTID$
 	# RT:{START=--start-position %s}

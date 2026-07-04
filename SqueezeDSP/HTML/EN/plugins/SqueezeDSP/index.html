@@ -122,37 +122,42 @@ print ( $myversion );
                 </div>
             </div>
         </TD>
-        <TD class="rowSuffix"></TD>
+        <TD class="rowSuffix" style="text-align: right;"><button class="sqdsp-click minibutton button-red" type="button"
+					id="btn_PresetMenu"
+					title="Preset options"
+					style="min-width:2em;padding:0 0.4em"
+					onclick="openPresetMenu(this); reStyleElement('btn_LoadPreset', 'button-amber', 'button-teal'); ">&#8942;</button></TD>
     </TR>
 </TABLE>
 <DIV id="body_presets">
 <TABLE class="table-container section-body-table">
-    <TR id="control_Preset">
-        <TD class="rowTitle">
-            <div class="tooltip">
-                <Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_CHOOSE_PRESET" | string %]</Output>
-                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_PRESET_HELP" | string %]</span>
-            </div>
-        </TD>
-        <TD class="rowBody">
-            <select class="sqdsp-select" id="sel_Preset"
-                    onchange="reStyleElement('btn_LoadPreset', 'button-teal', 'button-amber')">
-                <option value="-">None</option>
-            </select>
-        </TD>
-        <TD class="rowSuffix">
-            <button class="sqdsp-click button button-teal" type="button"
-                    id="btn_LoadPreset" value="Load"
-                    onclick="SqueezeDSPFetchPresetSettings(sel_Preset.value, [
-                        function() { NewFieldValue('Last_preset', sel_Preset, false); },
-                        function() { edt_NewPreset.value = sel_Preset.value; },
-                        LocalUpdateSettings,
-                        function() { reStyleElement('btn_LoadPreset', 'button-amber', 'button-teal'); },
-                        function() { SqueezeDSPSaveAll(); },
-                        function() { DisplayAlert('Preset', 'Applied', 2000); }
-                    ]);">Load</button>
-        </TD>
-    </TR>
+	<TR id="control_Preset">
+		<TD class="rowTitle">
+			<div class="tooltip">
+				<Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_CHOOSE_PRESET" | string %]</Output>
+				<span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_PRESET_HELP" | string %]</span>
+			</div>
+		</TD>
+		<TD class="rowBody">
+			<select class="sqdsp-select" id="sel_Preset"
+					onchange="reStyleElement('btn_LoadPreset', 'button-teal', 'button-amber')">
+				<option value="-">None</option>
+			</select>
+		</TD>
+		<TD class="rowSuffix" style="white-space:nowrap">
+			<button class="sqdsp-click button button-teal" type="button"
+					id="btn_LoadPreset" value="Load"
+					onclick="SqueezeDSPFetchPresetSettings(sel_Preset.value, [
+						function() { NewFieldValue('Last_preset', sel_Preset, false); },
+						function() { edt_NewPreset.value = sel_Preset.value; },
+						LocalUpdateSettings,
+						function() { reStyleElement('btn_LoadPreset', 'button-amber', 'button-teal'); },
+						function() { SqueezeDSPSaveAll(); },
+						function() { DisplayAlert('Preset', 'Applied', 2000); }
+					]);">Load</button>
+			
+		</TD>
+	</TR>
 
     <TR id="control_NewPreset">
         <TD class="rowTitle">
@@ -168,7 +173,8 @@ print ( $myversion );
             <button class="sqdsp-click button button-green" type="button"
                     name="btn_NewPreset" value="Save"
                     onclick="NewFieldValue('Last_preset', edt_NewPreset, false);
-                             SqueezeDSPSaveAll(SetNewPreset(edt_NewPreset));">Save</button>
+                             SqueezeDSPSaveAll(SetNewPreset(edt_NewPreset));
+							 refreshPresetList();">Save</button>
         </TD>
     </TR>
 

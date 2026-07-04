@@ -115,8 +115,8 @@ sub initConfiguration {
 			# Support both FLAC and MP3
 			@formats = ('FLAC24', 'MP3');
 		} else {
-			# Only MP3 (fallback for non-FLAC clients or SoftSqueeze)
-			@formats = ('MP3');
+			# WAV and MP3 (fallback for non-FLAC clients or SoftSqueeze)
+			@formats = ('WAV16','MP3');
 		}
 		
 		# Generate and print a template for each format
@@ -171,29 +171,39 @@ sub removeUnwantedConversion {
 }
 
 sub removeNativeConversion {
-    my $conv = Slim::Player::TranscodingHelper::Conversions();
+  my $conv = Slim::Player::TranscodingHelper::Conversions();
     my %players = %{Plugins::SqueezeDSP::Utils::_getEnabledPlayers()};
-	my $convolver = $Plugins::SqueezeDSP::Plugin::convolver;
+    my $convolver = $Plugins::SqueezeDSP::Plugin::convolver;
+
+    # Fallback to 'SqueezeDSP' in case $convolver is unexpectedly empty
+    my $conv_placeholder = '[' . ($convolver || 'SqueezeDSP') . ']';
 
     for my $profile (sort keys %$conv) {
         my ($inputtype, $outputtype, $clienttype, $clientid) = Plugins::SqueezeDSP::Utils::_inspectProfile($profile);
         my $command = $conv->{$profile};
         my $enabled = Slim::Player::TranscodingHelper::enabledFormat($profile);
-		# we get to keep squeezedsp commands whatever the formatting.
-		if (index($command, $convolver) == -1) {
-			# remove any native conversion
-			if ($enabled == 1 && $command eq "-") {
-				Plugins::SqueezeDSP::Utils::debug("delete native command - input: $inputtype, output $outputtype, clienttype $clienttype, clientid $clientid, enabled $enabled, command $command");
-				delete $Slim::Player::TranscodingHelper::commandTable{ $profile };
-				delete $Slim::Player::TranscodingHelper::capabilities{ $profile };
-			}
-			# remove any competing conversions to flac or mp3 
-			if ($enabled == 1 && ( $outputtype eq "flc" || $outputtype eq "mp3" )) {
-				Plugins::SqueezeDSP::Utils::debug("delete $outputtype command - input: $inputtype, output $outputtype, clienttype $clienttype, clientid $clientid, enabled $enabled, command $command");
-				delete $Slim::Player::TranscodingHelper::commandTable{ $profile };
-				delete $Slim::Player::TranscodingHelper::capabilities{ $profile };
-			}
-		}
+        my %SUPPORTED_NATIVE_INPUTS = map { $_ => 1 } qw(aac aif alc alcx ape dsf dff flc hls mov mp3 mp4 mp4x mpc ogg ogf ops spt wav wma wmal wmap wvp);
+
+        if ($SUPPORTED_NATIVE_INPUTS{$inputtype}) {
+            # Keep only commands that use our own convolver (by matching the placeholder)
+            # Use \Q...\E to safely handle any special regex characters
+            next if $command =~ /\Q$conv_placeholder\E/;
+
+            # Remove native (direct) entries
+            if ($enabled == 1 && $command eq "-") {
+                Plugins::SqueezeDSP::Utils::debug("delete native command - input: $inputtype, output $outputtype, clienttype $clienttype, clientid $clientid, enabled $enabled, command $command");
+                delete $Slim::Player::TranscodingHelper::commandTable{ $profile };
+                delete $Slim::Player::TranscodingHelper::capabilities{ $profile };
+            }
+            # Remove competing conversions to flac or mp3 (not our own)
+            elsif ($enabled == 1 && ($outputtype eq "flc" || $outputtype eq "mp3" || $outputtype eq "wav")) {
+                Plugins::SqueezeDSP::Utils::debug("delete $outputtype command - input: $inputtype, output $outputtype, clienttype $clienttype, clientid $clientid, enabled $enabled, command $command");
+                delete $Slim::Player::TranscodingHelper::commandTable{ $profile };
+                delete $Slim::Player::TranscodingHelper::capabilities{ $profile };
+            }
+        } else {
+            Plugins::SqueezeDSP::Utils::debug("skip profile $profile - input $inputtype not in supported list or is a direct-stream sentinel");
+        }
     }
 }
 

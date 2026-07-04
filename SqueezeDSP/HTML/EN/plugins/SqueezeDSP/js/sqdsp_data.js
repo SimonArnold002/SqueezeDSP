@@ -329,6 +329,31 @@ function SqueezeDSPSavePreset(myVal, callback)
 		}	});
 }
 
+function SqueezeDSPDeletePreset(presetName, callback) {
+    if (!presetName || presetName === '-') return;
+    new Ajax.Request('/jsonrpc.js', {
+        method: 'post',
+        asynchronous: true,
+        postBody: Object.toJSON({
+            id: 1,
+            method: 'slim.request',
+            params: [
+                getCurrentPlayer(),
+                [
+                    'squeezedsp.deletepreset',
+                    'preset:' + presetName,
+                ],
+            ],
+        }),
+        onFailure: function () { alert('Delete failed'); },
+        onSuccess: function (response) {
+            var data = response.responseText.evalJSON();
+            if (callback) callback();
+        },
+    });
+}
+
+
 function SqueezeDSPSaveEQBand(myBand, myFreq, myGain, myQ)
 {
 				//calls plugin seteqCommand

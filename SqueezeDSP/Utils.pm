@@ -104,6 +104,13 @@ sub setPref {
     SaveJSONFile($myConfig, $file);
 }
 
+sub getPref {
+    my ($client, $prefName) = @_;
+    my $file = getPrefFile($client);
+    my $config = LoadJSONFile($file) // {};
+    return $config->{Client}->{$prefName} // '';
+}
+
 sub delPref {
     my ($client, $prefName) = @_;
     $prefs->client($client)->remove($prefName) if $prefs->client($client)->exists($prefName);

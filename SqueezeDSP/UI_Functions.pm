@@ -500,6 +500,72 @@ sub loadPresetFile {
     }
 }
 
+sub deletepresetCommand {
+    my $request = shift;
+    my $client  = $request->client();
+    Plugins::SqueezeDSP::Utils::debug("command: deletepreset");
+
+    if ( $request->isNotQuery(
+            [[ $Plugins::SqueezeDSP::Plugin::thistag . '.deletepreset' ]] ) )
+    {
+        Plugins::SqueezeDSP::Utils::oops( $client, undef,
+            "deletepreset not command" );
+        $request->setStatusBadDispatch();
+        return;
+    }
+
+    my $key = $request->getParam('preset');
+    if ( !$key || $key eq '-' ) {
+        Plugins::SqueezeDSP::Utils::oops( $client, undef,
+            "deletepreset: no preset name" );
+        $request->setStatusBadDispatch();
+        return;
+    }
+
+    Plugins::SqueezeDSP::Utils::debug("command: deletepreset($key)");
+	# sel_Preset values are already full paths; bare names need constructing
+	my $file = ( $key =~ /\.preset\.json$/ )
+		? $key
+		: catdir(
+			$Plugins::SqueezeDSP::Plugin::pluginSettingsDataDir,
+			join( '_', split( /:/, $key ) ) . '.preset.json'
+		);
+
+    if ( !-f $file ) {
+        Plugins::SqueezeDSP::Utils::oops( $client, undef,
+            "deletepreset: file not found: $file" );
+        $request->setStatusBadDispatch();
+        return;
+    }
+
+    unless ( unlink $file ) {
+        Plugins::SqueezeDSP::Utils::oops( $client, undef,
+            "deletepreset: unlink failed: $!" );
+        $request->setStatusBadDispatch();
+        return;
+    }
+
+    # If deleted preset was the active one, clear both prefs
+    my $lastPreset =
+      Plugins::SqueezeDSP::Utils::getPref( $client, 'Last_preset' ) // '';
+    if ( $lastPreset eq $key ) {
+        Plugins::SqueezeDSP::Utils::setPref( $client, 'Last_preset', '' );
+        Plugins::SqueezeDSP::Utils::setPref( $client, 'Preset',      '' );
+    }
+
+    my $line = $client->string('PLUGIN_SQUEEZEDSP_PRESET_DELETED');
+    $client->showBriefly(
+        {
+            'line' => [ undef, $line ],
+            'jive' => { 'type' => 'popupinfo', text => [$line] },
+        },
+        { 'duration' => 2 }
+    );
+
+    $request->setStatusDone();
+}
+
+
 sub clearlogCommand {
     my $request = shift;
     my $client = $request->client();

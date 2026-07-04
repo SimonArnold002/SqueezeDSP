@@ -13,6 +13,7 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#	
 	#
+	0.1.72	Fox: Added support for SpotOn plugin, removing conversion leaves non-competing fmt -> fmt conversion alone.
 	0.1.71	Fox: Updates to core binary outputs mp3 and flac and also transcoding now simpler but requires different cleanup
 	0.1.61	Fox: Force fixing custom-conf.conf re-write and amending headphone dropdown to scale better
 	0.1.60  Fox: Added replay gain, fir filter strength, toggles for panels
@@ -124,7 +125,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.71";
+my $revision = "0.1.72";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
@@ -203,6 +204,7 @@ sub initPlugin {
     Slim::Control::Request::addDispatch([$thistag . '.readclientSettings'], [1, 1, 1, \&Plugins::SqueezeDSP::UI_Functions::readClientSettings]);
     Slim::Control::Request::addDispatch([$thistag . '.readpresetSettings'], [1, 1, 1, \&Plugins::SqueezeDSP::UI_Functions::readPresetSettings]);
     Slim::Control::Request::addDispatch([$thistag . '.importwav'], [1, 1, 1, \&Plugins::SqueezeDSP::UI_Functions::importwavCommand]);
+	Slim::Control::Request::addDispatch([ $thistag . '.deletepreset' ], [ 1, 1, 1, \&Plugins::SqueezeDSP::UI_Functions::deletepresetCommand ]);
     Slim::Control::Request::addDispatch([$thistag . '.clearlog'], [1, 1, 0, \&Plugins::SqueezeDSP::UI_Functions::clearlogCommand]);
 
 	Slim::Control::Request::addDispatch([$thistag . '.trackgain'], [1, 1, 0, \&Plugins::SqueezeDSP::Utils::_trackGainQuery]);

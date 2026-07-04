@@ -190,6 +190,9 @@ PLUGIN_SQUEEZEDSP_SPOTIFY_GAIN
 PLUGIN_SQUEEZEDSP_SPOTIFY_GAIN_HELP
 	EN	Gain applied to Spotify tracks. -4.0 dB aligns Spotify (-14 LUFS) with ReplayGain 1.0 tagged libraries (-18 LUFS).
 
+PLUGIN_SQUEEZEDSP_PRESET_DELETED
+	EN	Preset deleted
+
 PLUGIN_SQUEEZEDSP_EQUALIZER_SECTION
 	EN	Equalizer
 
@@ -203,10 +206,10 @@ PLUGIN_SQUEEZEDSP_CHOOSEFILE
 	EN	Choose REW or WAV File
 
 PLUGIN_SQUEEZEDSP_HEADPHONEEQ
-	EN	Headphone EQ
+	EN	Headphone
 
 PLUGIN_SQUEEZEDSP_HEADPHONEEQ_EXPERIMENTAL
-	EN	(experimental)
+	EN	EQ
 
 PLUGIN_SQUEEZEDSP_HEADPHONEEQ_HELP
 	EN	Search AutoEQ headphone profiles and import 48kHz FIR WAV if available. The WAV file will appear in the FIR dropdown once imported, select it to apply.
