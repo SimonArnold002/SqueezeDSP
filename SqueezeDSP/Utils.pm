@@ -79,15 +79,6 @@ sub _inspectProfile {
     return (undef, undef, undef, undef);
 }
 
-sub _getEnabledPlayers {
-    my @clientList = Slim::Player::Client::clients();
-    my %enabled = ();
-    for my $client (@clientList) {
-        $enabled{$client->id()} = 1;
-    }
-    return \%enabled;
-}
-
 sub getPrefFile {
     my $client = shift;
     my $settingsDir = $Plugins::SqueezeDSP::Plugin::pluginSettingsDataDir;

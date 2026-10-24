@@ -13,6 +13,9 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#	
 	#
+	0.1.72.1	Fork (SimonArnold002): DSP defeatable per player (a DSP-off player plays as if the plugin were absent, LMS's own rules are never
+				deleted), every input type through the DSP, 24-bit FLAC out or PCM as 24-bit WAV for players that read a WAV header,
+				decoders hand the engine a WAV header, DSD at the player's DXD target, no DSP below FLAC, toggles apply without a restart.
 	0.1.72	Fox: Added support for SpotOn plugin, removing conversion leaves non-competing fmt -> fmt conversion alone.
 	0.1.71	Fox: Updates to core binary outputs mp3 and flac and also transcoding now simpler but requires different cleanup
 	0.1.61	Fox: Force fixing custom-conf.conf re-write and amending headphone dropdown to scale better
@@ -125,7 +128,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72";
+my $revision = "0.1.72.1";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
@@ -135,8 +138,9 @@ $thistag = "squeezedsp";
 $thisapp = "SqueezeDSP";
 my $binary;
 my $settingstag = "SqueezeDSPSettings";
-my $confBegin = "SqueezeDSP#begin";
-my $confEnd = "SqueezeDSP#end";
+# package variables: Configuration.pm writes and parses the conf markers with these
+our $confBegin = "SqueezeDSP#begin";
+our $confEnd = "SqueezeDSP#end";
 my $modeAdjust       = "PLUGIN.SqueezeDSP.Adjust";
 my $modeValue        = "PLUGIN.SqueezeDSP.Value";
 my $modePresets      = "PLUGIN.SqueezeDSP.Presets";
@@ -191,7 +195,8 @@ sub initPlugin {
 
 	#$gainLog = catdir(Slim::Utils::OSDetect::dirsFor('log'), "gain.log");  # add this
 	
-   # $myconfigrevision = Plugins::SqueezeDSP::TemplateConfig::get_config_revision();
+    # a template revision bump forces a conf rewrite only when this is set
+    $myconfigrevision = Plugins::SqueezeDSP::TemplateConfig::get_config_revision();
     # ======== END: VARIABLE INITIALIZATION ========
 
     Plugins::SqueezeDSP::Utils::debug("plugin " . $revision . " enabled");
@@ -214,12 +219,17 @@ sub initPlugin {
     # Binary setup and housekeeping
     Plugins::SqueezeDSP::Binary::setup_binary($class);
     Plugins::SqueezeDSP::Binary::housekeeping();
-    Plugins::SqueezeDSP::Configuration::removeNativeConversion();
+
+    # LMS's native rules are left alone: a player with DSP off must play exactly as if
+    # this plugin were not installed. Our rules win per player through the model slot
+    # and the player's format list instead (Configuration::applyFormatOrder), which
+    # also leaves the server's prioritizeNative nothing to move ahead of them.
 
     # Event subscription
     #Slim::Control::Request::subscribe(\&clientEvent, [['client'],['new', 'reconnect']]);
 	Slim::Control::Request::subscribe(\&clientEventNew, [['client'],['new']]);
 	Slim::Control::Request::subscribe(\&clientEventReconnect, [['client'],['reconnect']]);
+	Slim::Control::Request::subscribe(\&syncEvent, [['sync']]);
 
 	# add this for gain logging
 	#Slim::Control::Request::subscribe(\&_trackChanged, [['playlist'],['newsong']]);
@@ -242,7 +252,7 @@ sub clientEventNew {
     my $client  = $request->client();
     return unless defined $client;
 	Plugins::SqueezeDSP::Utils::debug( "New Client detected" );
-    Plugins::SqueezeDSP::Configuration::initConfiguration($client);
+    Plugins::SqueezeDSP::Configuration::applyClientState($client);
 }
 
 sub clientEventReconnect {
@@ -250,8 +260,15 @@ sub clientEventReconnect {
     my $client  = $request->client();
     return unless defined $client;
 	Plugins::SqueezeDSP::Utils::debug( "Existing Client reconnected" );
-    Plugins::SqueezeDSP::Configuration::initConfiguration($client);
-	Plugins::SqueezeDSP::Configuration::removeNativeConversion();
+    # a HELO resets the player's format list, so the order is applied again
+    Plugins::SqueezeDSP::Configuration::applyClientState($client);
+}
+
+sub syncEvent {
+    my $request = shift;
+    my $client  = $request->client();
+    return unless defined $client;
+    Plugins::SqueezeDSP::Configuration::warnMixedSync($client);
 }
 
 sub webPages {

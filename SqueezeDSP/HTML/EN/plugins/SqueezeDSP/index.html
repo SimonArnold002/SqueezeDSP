@@ -68,6 +68,8 @@ print ( $myversion );
     <Input id="LowPass_Desc"    readonly value='[% "PLUGIN_SQUEEZEDSP_LOWPASS"        | string %]'>
     <Input id="LowShelf_Desc"   readonly value='[% "PLUGIN_SQUEEZEDSP_LOWSHELF"       | string %]'>
     <Input id="HighShelf_Desc"  readonly value='[% "PLUGIN_SQUEEZEDSP_HIGHSHELF"      | string %]'>
+    <Input id="PCMNeedsHeader_Help" readonly value='[% "PLUGIN_SQUEEZEDSP_PCM_NEEDS_HEADER" | string %]'>
+    <Input id="NoDSPBelowFLAC_Help" readonly value='[% "PLUGIN_SQUEEZEDSP_NO_DSP_BELOW_FLAC" | string %]'>
 </DIV>
 
 <!-- ============================================================
@@ -99,6 +101,37 @@ print ( $myversion );
                     id="btn_Apply" value="Apply"
                     onclick="SqueezeDSPSaveAll(); DisplayAlert('All Settings', 'Applied', 2000);">Apply</button>
         </TD>
+    </TR>
+    <!-- Output format: FLAC, or PCM as WAV with its header (only for a player that reads one) -->
+    <TR id="control_OutputFormat">
+        <TD class="rowTitle">
+            <div class="tooltip">
+                <label class="infoTitle">[% "PLUGIN_SQUEEZEDSP_OUTPUT" | string %]</label>
+                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_OUTPUT_HELP" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowBody">
+            <div class="filter-group" id="output-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="outputformat" value="FLAC" checked
+                               onchange="NewFieldValue('OutputFormat', this, false); LocalSetupOutput();">
+                        <span class="full-label">FLAC 24-bit</span>
+                        <span class="abbr-label">FLAC</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="outputformat" value="PCM"
+                               onchange="NewFieldValue('OutputFormat', this, false); LocalSetupOutput();">
+                        <span class="full-label">PCM (WAV 24-bit)</span>
+                        <span class="abbr-label">PCM</span>
+                    </label>
+                </div>
+            </div>
+            <div id="note_OutputFormat" style="display: none; font-size: 0.85em; opacity: 0.8; margin-top: 0.3em;"></div>
+        </TD>
+        <TD class="rowSuffix"></TD>
     </TR>
 </TABLE>
 

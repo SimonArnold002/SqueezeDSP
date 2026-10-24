@@ -65,7 +65,8 @@ function LocalUpdateSettings() {
     
     myRadio = LocalSetupToggle('DSP', SqueezeDSPData.Client.Bypass, true);
     ToggleControl(myRadio, 'DSP_container', true);
-                
+    LocalSetupOutput();
+
     myRadio = LocalSetupToggle('Loudness', replaceNull(SqueezeDSPData.Client.Loudness.enabled,0));
     ToggleControl(myRadio, 'control_Loudness', false); 
 	myRadio = LocalSetupToggle('ReplayGain', replaceNull(SqueezeDSPData.Client.ReplayGain && SqueezeDSPData.Client.ReplayGain.enabled, 0));
@@ -135,6 +136,34 @@ function LocalSetupToggle(myControl, newValue, InvertToggle = false) {
         else myCheck.checked = false;
     }
     return myCheck;
+}
+
+// Output format: FLAC 24-bit (the default), or PCM as 24-bit WAV with its header, which only
+// a player that reads the header can take (a squeezelite started with -W). A player that
+// cannot take 24-bit FLAC gets no DSP at all. readclientSettings reports both (dsp_ok,
+// wav_ok); the server applies the same rule whatever the page sends.
+function LocalSetupOutput() {
+    const can = (typeof SqueezeDSPPlayer === 'object' && SqueezeDSPPlayer) ? SqueezeDSPPlayer : { dspOk: true, wavOk: false };
+    const outVal = replaceNull(SqueezeDSPData.Client.OutputFormat, 'FLAC');
+    const flac = document.querySelector('#output-selector input[value="FLAC"]');
+    const pcm  = document.querySelector('#output-selector input[value="PCM"]');
+    const note = document.getElementById('note_OutputFormat');
+    const dsp  = document.getElementById('DSP');
+
+    if (pcm) {
+        pcm.disabled = !can.wavOk;
+        pcm.checked = (outVal === 'PCM');
+    }
+    if (flac) flac.checked = (outVal !== 'PCM');
+    if (dsp) dsp.disabled = !can.dspOk;
+
+    let msg = '';
+    if (!can.dspOk) msg = document.getElementById('NoDSPBelowFLAC_Help').value;
+    else if (!can.wavOk) msg = document.getElementById('PCMNeedsHeader_Help').value;
+    if (note) {
+        note.textContent = msg;
+        note.style.display = msg ? 'block' : 'none';
+    }
 }
 
 function ToggleControl(myElement, myControltoToggle, InvertToggle = false) {

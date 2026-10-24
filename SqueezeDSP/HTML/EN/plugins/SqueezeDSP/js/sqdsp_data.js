@@ -10,11 +10,15 @@ SqueezeDSPData = {
     Revision: 0
 };
 
+// what the current player can take, from readclientSettings (see LocalSetupOutput)
+var SqueezeDSPPlayer = null;
+
 function InitialiseData()
 
     {
     return {
         Bypass: 1,
+        OutputFormat: "FLAC",   // or "PCM": 24-bit WAV with its header, for a player that reads one
         Preamp: 0,
         Balance: 0,
         Width: 0,
@@ -396,6 +400,13 @@ function SqueezeDSPFetchCurrentSettings(callback) {
         onSuccess: (response) => {
             const data = response.responseText.evalJSON();
             const rawJson = data.result.json;
+
+            // What this player can take (kept out of SqueezeDSPData, which saveall writes back):
+            // the DSP at all, and PCM as WAV with its header. An older server sends neither.
+            SqueezeDSPPlayer = {
+                dspOk: Number(data.result.dsp_ok) !== 0,
+                wavOk: Number(data.result.wav_ok) === 1
+            };
 
             try {
                 // Start with a fully-defaulted structure

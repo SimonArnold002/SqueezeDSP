@@ -20,6 +20,18 @@ PLUGIN_SQUEEZEDSP_BYPASS
 PLUGIN_SQUEEZEDSP_BYPASS_HELP
 	EN	DSP Off/On - Selecting On will enable DSP processing and selecting Off will bypass all DSP processing. This may be useful if you have multiple players and only want SqueezeDSP active on some of them.
 
+PLUGIN_SQUEEZEDSP_OUTPUT
+	EN	Output
+
+PLUGIN_SQUEEZEDSP_OUTPUT_HELP
+	EN	What SqueezeDSP sends to the player after the DSP: 24-bit FLAC (the default, for any player), or 24-bit PCM as WAV, for a player that reads a WAV header (squeezelite started with -W).
+
+PLUGIN_SQUEEZEDSP_PCM_NEEDS_HEADER
+	EN	PCM needs a player that reads a WAV header (squeezelite started with -W). This player gets FLAC.
+
+PLUGIN_SQUEEZEDSP_NO_DSP_BELOW_FLAC
+	EN	This player cannot take 24-bit FLAC, so SqueezeDSP stays off for it.
+
 PLUGIN_SQUEEZEDSP_LOUDNESS
 	EN	Loudness
 	

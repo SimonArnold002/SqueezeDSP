@@ -33,8 +33,11 @@ function SliderReset() {
 }
 
 function LocalClearSettings() {
+    // the output format is how the player is fed, not a DSP setting: Reset keeps it
+    const keepOutput = SqueezeDSPData.Client && SqueezeDSPData.Client.OutputFormat;
     InitialiseSqueezeDSPData();
 	SqueezeDSPData.Client.Bypass = 0;  // Reset clears settings but stays active
+    if (keepOutput) SqueezeDSPData.Client.OutputFormat = keepOutput;
     LocalUpdateSettings();
     highlightMatchingOption('sel_FIRWavFile', 'None');
     highlightMatchingOption('sel_Preset', 'None');

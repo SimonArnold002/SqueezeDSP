@@ -187,6 +187,10 @@ sub saveallCommand {
     Plugins::SqueezeDSP::Utils::debug("JSON length: " . length($json));
     Plugins::SqueezeDSP::Utils::SaveJSONFile($data, $myJSONFile);
 
+    # DSP on/off, output or upsample may have changed: rules and format order follow
+    # before the seek below re-opens the stream, so it already uses the new rule
+    Plugins::SqueezeDSP::Configuration::applyClientState($client) if $client;
+
     # Force DSP reload by seeking (if player available) - DO THIS BEFORE setStatusDone
     if ($client) {
         my $controller = $client->controller();
@@ -232,6 +236,10 @@ sub saveallCommand {
                             
                             # Only seek if we're not at/near end of track
                             if ($new_position < $track_duration - 0.1) {
+                                # The song caches how it can seek, worked out from the rule it
+                                # matched (Song.pm:822; status polls fill it). The rules may just
+                                # have changed, so let the seek work it out again.
+                                $song->_canSeek(undef) if $song->can('_canSeek');
                                 if ($was_playing) {
                                     $client->execute(['time', $new_position]);
                                 } else {
@@ -357,7 +365,12 @@ sub readClientSettings {
     Plugins::SqueezeDSP::Utils::debug("query: readClientSettings");
     my $myJSONFile = Plugins::SqueezeDSP::Utils::getPrefFile($client);
     Plugins::SqueezeDSP::Utils::debug("Reading preset file: $myJSONFile");
-    
+
+    # what the page may offer this player: the DSP at all (no DSP below 24-bit FLAC) and
+    # PCM, which is WAV with its header and needs a player that reads one
+    $request->addResult('dsp_ok', Plugins::SqueezeDSP::Configuration::playerTakes($client, 'dsp'));
+    $request->addResult('wav_ok', Plugins::SqueezeDSP::Configuration::playerTakes($client, 'wav'));
+
     if (open(my $fh, '<', $myJSONFile)) {
         local $/;
         my $jsonContent = <$fh>;
@@ -417,7 +430,10 @@ sub readPresetSettings {
             my $updatedJsonContent = encode_json($settings);
             print $fh_out $updatedJsonContent;
             close $fh_out;
-            
+
+            # a preset carries Bypass (and output, upsample): rules and format order follow
+            Plugins::SqueezeDSP::Configuration::applyClientState($client);
+
             $request->addResult('json', $updatedJsonContent);
             $request->addResult('clientName', $client->name);
             $request->addResult('revision', $Plugins::SqueezeDSP::Plugin::revision);
