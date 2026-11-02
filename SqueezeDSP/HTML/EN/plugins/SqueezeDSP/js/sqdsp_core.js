@@ -65,7 +65,10 @@ function LocalUpdateSettings() {
     
     myRadio = LocalSetupToggle('DSP', SqueezeDSPData.Client.Bypass, true);
     ToggleControl(myRadio, 'DSP_container', true);
+    ToggleControl(myRadio, 'DSP_container_signal', true);
     LocalSetupOutput();
+    LocalSetupUpsample();
+    LocalSetupDSD();
 
     myRadio = LocalSetupToggle('Loudness', replaceNull(SqueezeDSPData.Client.Loudness.enabled,0));
     ToggleControl(myRadio, 'control_Loudness', false); 
@@ -159,11 +162,152 @@ function LocalSetupOutput() {
 
     let msg = '';
     if (!can.dspOk) msg = document.getElementById('NoDSPBelowFLAC_Help').value;
+    else if (can.outReduced) {
+        // a reduced stream overrides the output chosen here while it is due (Bitrate Limiting, or the app's own list)
+        const names = { MP3: 'MP3 (320 kbps)', OPS: 'Opus (256 kbps)', OGG: 'Ogg Vorbis (quality 10)' };
+        const limit = can.outReduced === 'MP3' && can.outKbps;
+        const el = document.getElementById(limit ? 'ReducedLimit_Help' : 'ReducedApp_Help');
+        msg = el ? el.value.replace('%s', limit ? can.outKbps : (names[can.outReduced] || can.outReduced)) : '';
+    }
     else if (!can.wavOk) msg = document.getElementById('PCMNeedsHeader_Help').value;
+    if (note) note.textContent = msg;
+    const box = document.getElementById('body_output_note');
+    if (box) box.style.display = msg ? '' : 'none';
+}
+
+// Upsample (Upsample.pm), off by default; when on, the filter options show. readclientSettings
+// says whether this player can upsample (up_ok: an ffmpeg with soxr, a known max), why not, and
+// its two targets. A player that cannot shows Off whatever is stored, and the server writes no
+// upsample rules for it, whatever the page sends. Intermediate and minimum phase need sox (up_sox);
+// without it the server writes linear, and the page shows linear. The target rate is each track's own
+// family (up_targets) or one fixed rate, the player's top (up_fixed). A max rate caps both, up to the
+// player's top rate for its output (up_limits: FLAC out, WAV out); the page names the rates from it as the
+// server does (Upsample::targets), so a change of output or max rate shows before the server is asked.
+const UPSAMPLE_MAX_RATES = [768000, 384000, 192000, 96000];
+// the passband (Upsample.pm PASSBAND_FAMILY, PASSBAND_FIXED): per family 99% by default; a fixed target 95% by default
+// and at most that
+const UPSAMPLE_PASSBAND_FAMILY = 0.99, UPSAMPLE_PASSBAND_FIXED = 0.95;
+function upsampleRates(limit, max) {
+    const ceil = (max && (!limit || max < limit)) ? max : limit;
+    if (!ceil) return null;
+    let f44 = 44100, f48 = 48000;
+    while (f44 * 2 <= ceil) f44 *= 2;
+    while (f48 * 2 <= ceil) f48 *= 2;
+    if (f48 > ceil) f48 = f44;
+    return { f44: f44, f48: f48, top: Math.max(f44, f48) };
+}
+function LocalSetupUpsample() {
+    const can = (typeof SqueezeDSPPlayer === 'object' && SqueezeDSPPlayer) ? SqueezeDSPPlayer : { upOk: false, upWhy: '', upTargets: '', upFixed: '', upLimits: '', upFfmpeg: '', upSox: '' };
+    const c = SqueezeDSPData.Client;
+    const on = (replaceNull(c.Upsample, 'off') === 'on') && can.upOk;
+    const sw    = document.getElementById('chk_Upsample');
+    const opts  = document.getElementById('upsample-options');
+    const note  = document.getElementById('note_Upsample');
+
+    if (sw) {
+        sw.disabled = !can.upOk;
+        sw.checked = on;
+        sw.value = on ? 'on' : 'off';
+    }
+
+    // the target the server writes: one it knows, else each track's own family
+    const targets = ['family', 'fixed'];
+    let target = String(replaceNull(c.UpsampleTarget, 'family')).toLowerCase();
+    if (!targets.includes(target)) target = 'family';
+    targets.forEach(t => {
+        const el = document.querySelector(`#upsample-target-selector input[value="${t}"]`);
+        if (el) el.checked = (t === target);
+    });
+
+    // the max rate the server writes: one it knows, at or below the player's top rate for its output;
+    // above it, or unknown, the player's own (0)
+    const limits = String(can.upLimits || '').split(',').map(Number);
+    const pcm = replaceNull(c.OutputFormat, 'FLAC') === 'PCM' && can.wavOk;
+    const limit = (pcm ? limits[1] : limits[0]) || 0;
+    let max = Number(replaceNull(c.UpsampleMax, 0));
+    if (!UPSAMPLE_MAX_RATES.includes(max) || (limit && max > limit)) max = 0;
+    document.querySelectorAll('#upsample-max-selector input[type="radio"]').forEach(el => {
+        const v = Number(el.value);
+        el.disabled = v > 0 && limit > 0 && v > limit;
+        el.checked = (v === max);
+    });
+
+    // the phase the server writes: one it knows, and linear unless there is a sox
+    const phases = ['linear', 'intermediate', 'minimum'];
+    let phase = String(replaceNull(c.UpsamplePhase, 'linear')).toLowerCase();
+    if (!phases.includes(phase) || !can.upSox) phase = 'linear';
+    phases.forEach(p => {
+        const el = document.querySelector(`#upsample-phase-selector input[value="${p}"]`);
+        if (!el) return;
+        el.disabled = (p !== 'linear') && !can.upSox;
+        el.checked = (p === phase);
+    });
+
+    // the server's own defaults stand in for a value the page has no option for
+    setChoice('upsample-precision-selector', replaceNull(c.UpsamplePrecision, 28), 28);
+    // the passband: the target's default stands in for none; a fixed target offers 95% and lower, and shows a higher
+    // one stored at the 95% it plays at (kept as stored, so per family gets it back)
+    // (not replaceNull: Auto is 0, which it would take for none)
+    const pbDefault = target === 'fixed' ? UPSAMPLE_PASSBAND_FIXED : UPSAMPLE_PASSBAND_FAMILY;
+    const pbStored = c.UpsamplePassband;
+    let pb = (pbStored === undefined || pbStored === null || pbStored === '') ? pbDefault : Number(pbStored);
+    if (target === 'fixed' && pb > UPSAMPLE_PASSBAND_FIXED) pb = UPSAMPLE_PASSBAND_FIXED;
+    document.querySelectorAll('#upsample-passband-selector input[type="radio"]').forEach(el => {
+        el.disabled = target === 'fixed' && Number(el.value) > UPSAMPLE_PASSBAND_FIXED;
+    });
+    setChoice('upsample-passband-selector', pb, pbDefault);
+    const steep = document.getElementById('chk_UpsampleSteep');
+    if (steep) {
+        steep.checked = Number(replaceNull(c.UpsampleSteep, 0)) === 1;
+        steep.value = steep.checked ? 1 : 0;
+    }
+    if (opts) opts.style.display = on ? '' : 'none';
+
+    let msg = '';
+    if (!can.upOk) {
+        const ids = { nosoxr: 'UpsampleNoSoxr_Help', noffmpeg: 'UpsampleNoFfmpeg_Help', nomax: 'UpsampleNoMax_Help', hook: 'UpsampleNoHook_Help',
+                      reduced: 'UpsampleNoReduced_Help' };
+        const el = document.getElementById(ids[can.upWhy] || 'UpsampleNoFfmpeg_Help');
+        msg = el ? el.value : '';
+        if (can.upWhy === 'nosoxr' && can.upFfmpeg) msg += ' ' + can.upFfmpeg;
+    } else if (on && can.upTargets) {
+        // from the limit and max rate when the server sent the limits, else as the server last named them
+        const r = upsampleRates(limit, max);
+        const fixed = target === 'fixed' && (r || can.upFixed);
+        const el = document.getElementById(fixed ? 'UpsampleFixed_Help' : 'UpsampleTargets_Help');
+        const khz = x => (Number(x) / 1000) + ' kHz';
+        const rates = fixed ? khz(r ? r.top : can.upFixed)
+                            : (r ? [r.f44, r.f48] : can.upTargets.split(',')).map(khz).join(' / ');
+        msg = (el ? el.value + ' ' : '') + rates;
+        if (!can.upSox) {
+            const ns = document.getElementById('UpsampleNoSox_Help');
+            if (ns) msg += ' ' + ns.value;
+        }
+    }
     if (note) {
         note.textContent = msg;
-        note.style.display = msg ? 'block' : 'none';
+        note.style.display = msg ? '' : 'none';
     }
+}
+
+// check the button of a choice group whose value is the stored one, compared as numbers ('0.90' is 0.9);
+// none matching, the fallback's
+// DSD: how our engine decodes a DSF (ledger OUR OWN DSD DECODER), the player's DSDCutoff and DSDGain, shown as the engine
+// takes them (LyrionDSPSettings buildConfig): unset, unreadable or out of range, its default, 30 kHz and 0 dB
+function LocalSetupDSD() {
+    const c = SqueezeDSPData.Client;
+    const cs = c.DSDCutoff;   // (not replaceNull: None is 0, which it would take for none)
+    const cut = (cs === undefined || cs === null || cs === '') ? 30000 : Number(cs);
+    const gain = Number(replaceNull(c.DSDGain, 0));
+    setChoice('dsd-cutoff-selector', (cut === 0 || (cut > 20000 && cut <= 60000)) ? cut : 30000, 30000);
+    setChoice('dsd-gain-selector', (gain >= -24 && gain <= 12) ? gain : 0, 0);
+}
+
+function setChoice(groupId, value, fallback) {
+    const inputs = document.querySelectorAll('#' + groupId + ' input[type="radio"]');
+    const same = (a, b) => Number(a) === Number(b) && String(a).trim() !== '' && String(b).trim() !== '';
+    const want = Array.prototype.some.call(inputs, i => same(i.value, value)) ? value : fallback;
+    inputs.forEach(i => { i.checked = same(i.value, want); });
 }
 
 function ToggleControl(myElement, myControltoToggle, InvertToggle = false) {
@@ -391,6 +535,7 @@ function highlightMatchingOption(selectElementId, targetFullPath) {
 
     if (!targetFullPath || targetFullPath === '-') {
         selectElement.selectedIndex = 0;
+        setSelectValue(selectElement, selectElement.value);   // redraws the skin's custom-select
         return;
     }
 

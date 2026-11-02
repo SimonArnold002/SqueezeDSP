@@ -1439,3 +1439,137 @@ input[type="button"] {
   .sqdsp-select,
   .sqdsp-edit { font-size: 8px; padding: 1px 3px; }
 }
+
+/* =============================================================
+   15. FORK: OUTPUT AND UPSAMPLE SECTIONS, PHONE AND TABLET LAYOUT
+   Comes last so it overrides the size steps above. The choice buttons
+   (Output, Upsample, Phase) keep their full labels and wrap rather than
+   shrink. Below 600px a row stops being three columns: the label takes its
+   own line and the control the full width under it, as on the SqueezeDSP
+   page (live/sqdsp_live.css), and text stays readable.
+   ============================================================= */
+.sqdsp-note {
+  font-size: 12px;
+  opacity: 0.85;
+  margin: 0.4em 10px 0.2em;
+  line-height: 1.4;
+}
+
+.sqdsp-wide { padding: 6px 4px !important; }
+
+.filter-group.sqdsp-choice {
+  flex-wrap: wrap;
+  gap: 6px;
+  width: auto;
+}
+
+.filter-group.sqdsp-choice .filter-type {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 5px 12px;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+
+/* a choice whose buttons are all one width (Precision, Passband) */
+.filter-group.sqdsp-even .filter-type { min-width: 4.8em; justify-content: center; box-sizing: border-box; }
+
+/* a header's buttons and their note (Upsample's rates) on one line; the note wraps under them when short of room */
+.sqdsp-choice-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.sqdsp-choice-row .sqdsp-desc { margin-left: 0; flex: 0 1 auto; min-width: 0; }
+
+/* a setting's one-line description, beside its switch (wraps under it on a phone) */
+.sqdsp-desc { font-size: 12px; opacity: 0.85; line-height: 1.4; white-space: normal; margin-left: 6px; }
+.checkbox-row:has(.sqdsp-desc) { flex-wrap: wrap; width: auto; }
+
+/* a choice button's radio is hidden: no Material icon glyph on it (until the icon font loads that
+   glyph is its name in text, ~270px wide, and widens the page) */
+.filter-group input[type="radio"]::before,
+.filter-group-alt input[type="radio"]::before { content: none; }
+
+/* a tooltip wraps whatever its row does (a section header keeps its title on one line) */
+.tooltip .tooltiptext { white-space: normal; }
+
+/* tablet and phone: undo the shrinking of the size steps above, buttons wrap instead */
+@media (max-width: 768px) {
+  body { font-size: 10pt; }
+  Label, Output, .infoTitle { font-size: 10pt; }
+
+  .button { font-size: 12px; width: auto; min-width: 60px; padding: 3px 8px; }
+  .minibutton { width: auto; min-width: 26px; font-size: 12px; }
+  .OutputVal { width: 70px; font-size: 12px; padding: 2px 4px; }
+  .sqdsp-select, .sqdsp-edit { font-size: 12px; padding: 3px 6px; }
+
+  .filter-group, .filter-group-alt { flex-wrap: wrap; gap: 4px; }
+  .filter-group .filter-type,
+  .filter-group-alt .filter-type { font-size: 12px; padding: 5px 8px; flex: 0 0 auto; white-space: nowrap; }
+  .full-label { display: inline; }
+  .abbr-label { display: none; }
+
+  .custom-select-opener, .custom-select-option { font-size: 12px !important; }
+}
+
+@media (max-width: 600px) {
+  body { padding: 8px; }
+
+  .table-container,
+  .table-container > tbody { display: block; width: 100%; min-width: 0; }
+  .table-container tr { display: flex; flex-wrap: wrap; align-items: center; height: auto; width: 100%; box-sizing: border-box; }
+  .table-container td,
+  .table-container th { display: block; box-sizing: border-box; padding: 4px 6px; }
+  .table-container tr[style*="visibility"] { display: none; }
+
+  /* a setting: its label on one line, the control (and its value box) under it */
+  .table-container tr .rowTitle,
+  .sqdsp-up .rowTitle { flex: 1 0 100%; width: auto; padding-top: 8px; }
+  .table-container tr .rowBody,
+  .table-container tr .Slide { flex: 1 1 0; width: auto !important; min-width: 0 !important; margin: 0; height: auto; }
+  .table-container tr .rowSuffix { flex: 0 0 auto; width: auto; min-width: 0; max-width: none; }
+  .table-container tr .sqdsp-wide { flex: 1 0 100%; }
+
+  /* a section's header, and a filter band's first row: one line */
+  .table-container tr.row-header .rowTitle,
+  #peqContainer .table-container tr:first-child .rowTitle { flex: 0 1 auto; padding-top: 4px; white-space: nowrap; }
+  .table-container tr.row-header .rowBody,
+  #peqContainer .table-container tr:first-child .rowBody { flex: 1 1 0; min-width: 0 !important; }
+
+  /* Upsample's note goes under its buttons; the title stays level with the buttons, not mid-height */
+  .sqdsp-choice-row .sqdsp-desc { flex: 1 0 100%; }
+  .table-container tr#hdr_upsample { align-items: flex-start; }
+  .table-container tr#hdr_upsample .rowTitle { padding-top: 10px; }
+  /* Precision and Passband: one row, the buttons sharing it in equal widths */
+  .filter-group.sqdsp-even { flex-wrap: nowrap; gap: 4px; width: 100%; }
+  .filter-group.sqdsp-even .filter-type-container { flex: 1 1 0; min-width: 0; }
+  .filter-group.sqdsp-even .filter-type { width: 100%; min-width: 0; padding: 5px 2px; }
+
+  /* Output's two buttons don't fit beside its title at Material's font size: they take the next line */
+  .table-container tr#hdr_output { flex-wrap: wrap; }
+  .table-container tr#hdr_output .rowBody { flex: 1 0 100%; padding: 2px 6px 6px; }
+
+  /* a sub-setting's label (Spotify gain) on its own line like the rest */
+  .table-container tr .rowSubTitle { flex: 1 0 100%; width: auto; text-align: left; padding-left: 10px; }
+
+
+  .Slide { padding-right: 8px !important; }
+  input[type=range][orient=horizontal] { width: 100%; left: 0; }
+
+  .Toggle { width: 44px; height: 22px; border-radius: 22px; }
+  .Toggle:after { width: 20px; height: 20px; border-radius: 20px; }
+
+  /* a row's own colour stays off: Material paints every cell in its background (mods.css, !important)
+     and a row here no longer fills with its cells, so a header's --header-bg (which follows the
+     device's light/dark, not Material's theme) showed as white blocks round them */
+  .table-container tr,
+  .table-container tr.row-header,
+  .table-container tr:hover,
+  .table-container tr.row-header:hover,
+  #peqContainer .table-container tr:first-child,
+  #peqContainer .table-container tr:first-child:hover { background-color: transparent !important; }
+
+  /* a hidden tooltip still takes room and pushes the page sideways: none until shown */
+  .tooltip .tooltiptext,
+  .filter-type-container .tooltiptext { display: none; max-width: calc(100vw - 48px); box-sizing: border-box; }
+  .tooltip:hover .tooltiptext,
+  .filter-type-container:hover .tooltiptext { display: block; }
+}

@@ -1,0 +1,16 @@
+codeberg.org/gruf/go-ffmpreg v0.6.19 h1:2dCx2fFDRSdOrfe2OI00pbpYPKaghqjuz7n8XRsuqjY=
+codeberg.org/gruf/go-ffmpreg v0.6.19/go.mod h1:hE0Dmx3cjI3ZgCUVFNi3H+0JgIz6Us27arY1ML0AxqU=
+github.com/Foxenfurter/foxLyrionDSP v0.0.0-20260324154716-0ee8f9bf7411 h1:SZNWOU2KBglp+fd4KpLNOaSdx7noQDNg9Hh6IE0oJsM=
+github.com/Foxenfurter/foxLyrionDSP v0.0.0-20260324154716-0ee8f9bf7411/go.mod h1:ItQH+NYOwlenpO1oFALr6vvo3dtBVrPy2Wqhj3IQ3xc=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12 h1:dd7vnTDfjtwCETZDrRe+GPYNLA1jBtbZeyfyE8eZCyk=
+github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12/go.mod h1:i/KKcxEWEO8Yyl11DYafRPKOPVYTrhxiTRigjtEEXZU=
+github.com/tetratelabs/wazero v1.11.0 h1:+gKemEuKCTevU4d7ZTzlsvgd1uaToIDtlQlmNbwqYhA=
+github.com/tetratelabs/wazero v1.11.0/go.mod h1:eV28rsN8Q+xwjogd7f4/Pp4xFxO7uOGbLcD/LzB1wiU=
+golang.org/x/sys v0.38.0 h1:3yZWxaJjBmCWXqhN1qh02AkOnCQ1poK6oF+a7xWL6Gc=
+golang.org/x/sys v0.38.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+scientificgo.org/fft v0.0.0 h1:8nq6H5e0HY9ba+aie7+vz8an5xdBQZ7a2rnyZ3iQCHo=
+scientificgo.org/fft v0.0.0/go.mod h1:RAwyHm5LB0BYJ5LcHBZO6wo2brPH2kuIFLgC0P+O260=
+scientificgo.org/testutil v0.0.0 h1:y356DHRo0tAz9zIFmxlhZoKDlHPHaWW/DCm9k3PhIMA=
+scientificgo.org/testutil v0.0.0/go.mod h1:Go6R4b+9YkFocMo3H3vNQ7tjbrX9Rc12wal7NZjvPXg=

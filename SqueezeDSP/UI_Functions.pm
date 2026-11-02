@@ -225,31 +225,40 @@ sub saveallCommand {
                     if ($is_allowed_protocol && (!$extension || !grep { $_ eq $extension } @excluded_extensions)) {
                         # Get player state using controller methods
                         my $was_playing = $client->isPlaying();
+                        my $paused = $controller->isPaused();
                         my $current_position = $controller->playingSongElapsed();
                         my $track_duration = $controller->playingSongDuration();
-                        
+
                         # Validate seek conditions
-                        if ($was_playing && defined $current_position && defined $track_duration && $track_duration > 0) {
-                            # Calculate new position (0.5s forward)
-                            my $seek_amount = 0.5;
-                            my $new_position = $current_position + $seek_amount;
-                            
-                            # Only seek if we're not at/near end of track
-                            if ($new_position < $track_duration - 0.1) {
-                                # The song caches how it can seek, worked out from the rule it
-                                # matched (Song.pm:822; status polls fill it). The rules may just
-                                # have changed, so let the seek work it out again.
-                                $song->_canSeek(undef) if $song->can('_canSeek');
-                                if ($was_playing) {
-                                    $client->execute(['time', $new_position]);
-                                } else {
-                                    $client->execute(['pause', 0]);
-                                    $client->execute(['time', $new_position]);
-                                    $client->execute(['pause', 1]);
-                                }
-                                Plugins::SqueezeDSP::Utils::debug("DSP reload triggered: " . ($was_playing ? "Playing" : "Paused") . " track advanced to $new_position");
+                        if (($was_playing || $paused) && defined $current_position && defined $track_duration && $track_duration > 0) {
+                            # The song caches how it can seek, worked out from the rule it
+                            # matched (Song.pm:822; status polls fill it). The rules may just
+                            # have changed, so let the seek work it out again.
+                            $song->_canSeek(undef) if $song->can('_canSeek');
+
+                            if (!$song->canSeek()) {
+                                # Under the new rules LMS cannot start this track part way in, and a
+                                # seek it cannot do re-opens the track from 0:00 (_JumpToTime does not
+                                # ask, StreamingController.pm:1092-1142): the change waits for the next track
+                                Plugins::SqueezeDSP::Utils::debug("DSP reload skipped: the track cannot seek under the new rules, the change applies from the next track");
+                            } elsif ($paused) {
+                                # LMS's own paused seek (_JumpPaused, StreamingController.pm:1051-1090):
+                                # the stream closes now, and resuming re-opens it at this point through
+                                # the new rules, so the position is kept and the player stays paused
+                                $client->execute(['time', $current_position]);
+                                Plugins::SqueezeDSP::Utils::debug("DSP reload triggered: Paused, the track re-opens at $current_position on resume");
                             } else {
-                                Plugins::SqueezeDSP::Utils::debug("Skipping seek near end of track (position: $current_position, duration: $track_duration sec)");
+                                # Calculate new position (0.5s forward)
+                                my $seek_amount = 0.5;
+                                my $new_position = $current_position + $seek_amount;
+
+                                # Only seek if we're not at/near end of track
+                                if ($new_position < $track_duration - 0.1) {
+                                    $client->execute(['time', $new_position]);
+                                    Plugins::SqueezeDSP::Utils::debug("DSP reload triggered: Playing track advanced to $new_position");
+                                } else {
+                                    Plugins::SqueezeDSP::Utils::debug("Skipping seek near end of track (position: $current_position, duration: $track_duration sec)");
+                                }
                             }
                         }
                     } else {
@@ -370,6 +379,35 @@ sub readClientSettings {
     # PCM, which is WAV with its header and needs a player that reads one
     $request->addResult('dsp_ok', Plugins::SqueezeDSP::Configuration::playerTakes($client, 'dsp'));
     $request->addResult('wav_ok', Plugins::SqueezeDSP::Configuration::playerTakes($client, 'wav'));
+    # and Upsample: whether it can run for this player (an ffmpeg with soxr, a known max), why
+    # not, its two targets (44.1k family, 48k family) for its output and max rate as stored, and
+    # the ffmpeg LMS uses
+    my $prefs = Plugins::SqueezeDSP::Configuration::clientPrefs($client);
+    my $out = Plugins::SqueezeDSP::Configuration::outputFormat( $client, $prefs );
+    # and the output itself when it is a reduced stream (MP3, OPS, OGG: Configuration::reducedOutput), with the
+    # Bitrate Limiting an MP3 is encoded at (0: an app's MP3 at 320 kbps); a reduced stream is never upsampled
+    my $reduced = Plugins::SqueezeDSP::Configuration::isReduced($out);
+    $request->addResult('out_reduced', $reduced ? $out : '');
+    $request->addResult('out_kbps', $reduced ? Plugins::SqueezeDSP::Configuration::mp3Limit( $client, $out ) : 0);
+    my %upOpts = Plugins::SqueezeDSP::Upsample::options($prefs);
+    my ( $upOk, $upWhy, @upTargets ) = $reduced ? ( 0, 'reduced' ) : Plugins::SqueezeDSP::Upsample::available( $client,
+        Plugins::SqueezeDSP::Upsample::cap( $out, $upOpts{max} ) );
+    $request->addResult('up_ok', $upOk ? 1 : 0);
+    $request->addResult('up_why', $upWhy // '');
+    $request->addResult('up_targets', join( ',', @upTargets ));
+    # and the fixed target, the player's top rate (Upsample::top), for the page's Target rate choice
+    $request->addResult('up_fixed', @upTargets ? Plugins::SqueezeDSP::Upsample::top(@upTargets) : '');
+    # and the player's top rate with no max rate chosen, with FLAC out and with WAV out (the same when
+    # it takes no WAV), so the page offers the max rates up to it and names the targets as the output
+    # or the max rate changes, before the server is asked again
+    my @limits = map {
+        my ( undef, undef, @t ) = Plugins::SqueezeDSP::Upsample::available( $client, Plugins::SqueezeDSP::Upsample::cap($_) );
+        @t ? Plugins::SqueezeDSP::Upsample::top(@t) : '';
+    } ( 'FLAC', Plugins::SqueezeDSP::Configuration::playerTakes( $client, 'wav' ) ? 'WAV' : 'FLAC' );
+    $request->addResult('up_limits', join( ',', @limits ));
+    $request->addResult('up_ffmpeg', Plugins::SqueezeDSP::Upsample::ffmpegPath() // '');
+    # and the sox the intermediate and minimum phases need (LMS ships one)
+    $request->addResult('up_sox', Plugins::SqueezeDSP::Upsample::soxPath() // '');
 
     if (open(my $fh, '<', $myJSONFile)) {
         local $/;

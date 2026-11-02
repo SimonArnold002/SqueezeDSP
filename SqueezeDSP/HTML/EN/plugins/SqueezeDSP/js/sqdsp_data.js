@@ -19,6 +19,15 @@ function InitialiseData()
     return {
         Bypass: 1,
         OutputFormat: "FLAC",   // or "PCM": 24-bit WAV with its header, for a player that reads one
+        Upsample: "off",        // or "on": soxr in ffmpeg, in float, before the DSP (Upsample.pm)
+        UpsamplePrecision: 28,  // soxr bits: 20, 24, 28, 33
+        UpsampleSteep: 0,       // 1: soxr's Chebyshev passband
+        UpsamplePassband: 0.99, // 0.80-0.995 of the track's Nyquist, a fixed target at most 0.95; 0: Auto, soxr's own
+        UpsamplePhase: "linear", // or "intermediate", "minimum": sox's rate, with headroom (Upsample.pm)
+        UpsampleTarget: "family", // or "fixed": every track, DSD included, to the player's top rate
+        UpsampleMax: 0,         // 0: the player's top rate; or 768000, 384000, 192000, 96000 below it
+        DSDCutoff: 30000,       // a DSF on our engine (0.3.13): its low-pass, Hz; 24000, 30000, 50000, or 0 for none
+        DSDGain: 0,             // ... and its gain, dB: 0 or 6 (DSD plays 6 dB under PCM)
         Preamp: 0,
         Balance: 0,
         Width: 0,
@@ -405,7 +414,21 @@ function SqueezeDSPFetchCurrentSettings(callback) {
             // the DSP at all, and PCM as WAV with its header. An older server sends neither.
             SqueezeDSPPlayer = {
                 dspOk: Number(data.result.dsp_ok) !== 0,
-                wavOk: Number(data.result.wav_ok) === 1
+                wavOk: Number(data.result.wav_ok) === 1,
+                // Upsample: available here (an ffmpeg with soxr, a known max), why not, the two targets
+                upOk: Number(data.result.up_ok) === 1,
+                upWhy: data.result.up_why || '',
+                upTargets: data.result.up_targets || '',
+                // and the fixed target, the player's top rate (an older server sends none)
+                upFixed: data.result.up_fixed || '',
+                // the player's top rate with no max rate chosen: with FLAC out, with WAV out
+                upLimits: data.result.up_limits || '',
+                upFfmpeg: data.result.up_ffmpeg || '',
+                // the sox the intermediate and minimum phases need
+                upSox: data.result.up_sox || '',
+                // a reduced stream (MP3, OPS, OGG), and the Bitrate Limiting an MP3 is at (0: an app's 320 kbps)
+                outReduced: data.result.out_reduced || '',
+                outKbps: Number(data.result.out_kbps) || 0
             };
 
             try {

@@ -11,8 +11,77 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	# Revision history:
 	#
-	#	
 	#
+	#
+	0.1.72.25	Fork: Upsample's passband defaults to 99% per family, and to 95% with Player max, which takes no
+				higher (a higher choice plays at 95%); Auto stays a choice. The classic page shows a stored Auto and a
+				DSD low-pass of None as they are.
+	0.1.72.24	Fork: our DSD decoder takes a DSF to every target, the 48 kHz family (Upsample's fixed 96k, 384k, 768k)
+				and 705.6k from DSD64 included, in place of ffmpeg's soxr.
+	0.1.72.23	Fork: the engine decodes DSF itself (our own decoder, in place of ffmpeg) for a DSD target up to
+				352.8 kHz, with a DSD low-pass (24/30/50 kHz or none) and gain (0/+6 dB) set per player; DFF keeps its route.
+	0.1.72.22	Fork: the transcode conf is written whole to a file of its own and renamed into place; a player listed
+				twice in it is written once, with a warning naming it (its rules were held twice).
+	0.1.72.21	Fork: DSD plays through the DSP on a server with no ffmpeg (DSDPlayer's dsdplay decodes it where that
+				plugin is enabled, seeking at once; LMS's own sox otherwise); a reduced stream
+				keeps the DSP at the track's own rate, never upsampled: MP3 at a player's Bitrate Limiting, and an
+				app's Opus, Ogg or MP3 (LyrPlay's lossy modes); the page no longer says "not in this player's signal
+				path" for the last seconds of a queue.
+	0.1.72.20	Fork, review fixes: an album gain with no album peak is capped by the track's own peak; a PCM-mode
+				player's FLAC rules (taken under Bitrate Limiting) stop at FLAC's 384k, so MP3 and DSD play there again;
+				a WAV or AIFF stream with Upsample reads its pipe as pipe:0; the SqueezeDSP page keeps a change made
+				while a save was out when another player is picked, and no longer searches every process while a
+				player is idle (Linux x64 engine).
+	0.1.72.19	Fork: a FIR filter keeps its level at every rate. Played at a rate other than its own (with Upsample,
+				a 96 kHz filter at 384 kHz) it was up to 12 dB too loud, so ReplayGain levels changed with the rate, FIR
+				Strength mixed the wrong amounts, and the log's internal gain read far too low. ReplayGain is now capped by
+				the track's or album's peak, as LMS caps it, so a positive gain no longer clips (Linux x64 engine).
+	0.1.72.18	Fork: with PCM (WAV) out Upsample goes up to 768k (FLAC out stays at 384k), and a Max rate caps it on
+				both pages (No limit, 768, 384, 192 or 96 kHz), for every track and DSD.
+	0.1.72.17	Fork: DSD reaches its rate through ffmpeg's soxr when that ffmpeg has it (the player's Upsample options,
+				precision 28 with Upsample off), not ffmpeg's own resampler; the SqueezeDSP page shows it. A DSD track is
+				no longer called bypassed.
+	0.1.72.16	Fork: a track already at its target rate skips Upsample's resampler and plays as with Upsample off; the
+				SqueezeDSP page says it was bypassed.
+	0.1.72.15	Fork: Upsample's target rate: every track, DSD included, to the highest rate the player reports, so it never
+				changes rate, or each track to the top rate of its own family as before. The SqueezeDSP page finds a local
+				file's pipeline.
+	0.1.72.14	Fork: the classic settings page: Upsample on and off with the same switch as DSP and Replay Gain.
+	0.1.72.13	Fork: the classic settings page: Signal under Output, the upsample rates beside its buttons, Precision and
+				Passband as buttons.
+	0.1.72.12	Fork: the classic settings page on a phone in Material: no white blocks round the section headers; the Output
+				buttons line up with the other controls.
+	0.1.72.11	Fork: the classic settings page re-laid out: Output and Upsample each in their own section, one option per line,
+				the Steep filter explained, and the page fits a phone or a tablet.
+	0.1.72.10	Fork: our own build of the engine on Linux x64: a WAV or AIFF file plays to its end, and PCM mode's WAV
+				length is written by the engine. Seeking a local MP3, AAC, Ogg, Opus, Ogg FLAC, WAV or AIFF file keeps the DSP.
+				A DSP change while paused keeps the position, and the SqueezeDSP page shows no figures for a stream
+				the DSP was switched off for.
+	0.1.72.9	Fork: PCM mode's WAV header states the track's length (the length still to play plus a second) instead of "unknown",
+				so a renderer that reads its length from the header (the Platin Hub) shows it.
+	0.1.72.8	Fork: the SqueezeDSP page no longer says SqueezeDSP is out of the signal path near the end of each track.
+				Once the whole track has been sent to the player it keeps that track's final figures and says so, and
+				when the next track's processing starts early it names that track and shows its source.
+	0.1.72.7	Fork: a new SqueezeDSP page (/squeezedsp), opened from Material's Home screen or any player's menu: the
+				player's signal path as it runs, with its processing speed (how many times faster than realtime the
+				slowest stage works, from the processes LMS runs; Linux servers), and the main controls: DSP, output,
+				Upsample with its phase and filter options, preamp, balance, width and presets. The equaliser, filters and
+				the rest stay on the full settings page, linked from the new one.
+	0.1.72.6	Fork: Upsample phase on the settings page: linear (as before, ffmpeg's soxr), intermediate or minimum (SoX's
+				resampler, with 6 dB taken off before it and put back after, so every phase plays at the same level). The
+				page shows the precision and passband the player really has after a refresh (it showed the first option).
+	0.1.72.5	Fork: with Upsample on, streamed tracks (Qobuz and the like) and resumes start at once again. ffmpeg held back its
+				output until it had read about 5 s of the track, and LMS feeds a stream only as output comes back.
+	0.1.72.4	Fork: Upsample (per player, default off): every track but DSD goes to the player's top rate in its own family
+				(44.1 or 48 kHz) before the DSP, by ffmpeg's SoX resampler (soxr) in floating point, so inter-sample peaks reach
+				the DSP as real samples that its peaks report and Preamp can give headroom. Precision, passband and a steep
+				(Chebyshev) filter on the settings page. Needs the ffmpeg LMS uses to have soxr; without it the page says why.
+	0.1.72.3	Fork: local tracks start at once again (gapless): every type that can read a file has its own file rule, so the
+				decoder reads the file instead of LMS feeding it slowly on stdin. DSD, BBC Sounds, internet radio, Ogg, Opus, WMA
+				and HLS play again: their decoders hand the engine raw PCM, because a WAV header of unknown length on a pipe made
+				the engine print a warning into its audio output.
+	0.1.72.2	Fork: pause and seek on a FLAC stream work again. FLAC and Ogg FLAC are back on one raw rule for files and streams,
+				as upstream: a resumed stream reaches the rule with no STREAMINFO, so a WAV header could not describe it.
 	0.1.72.1	Fork (SimonArnold002): DSP defeatable per player (a DSP-off player plays as if the plugin were absent, LMS's own rules are never
 				deleted), every input type through the DSP, 24-bit FLAC out or PCM as 24-bit WAV for players that read a WAV header,
 				decoders hand the engine a WAV header, DSD at the player's DXD target, no DSP below FLAC, toggles apply without a restart.
@@ -128,7 +197,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.1";
+my $revision = "0.1.72.25";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
@@ -162,6 +231,10 @@ use Plugins::SqueezeDSP::Configuration;
 use Plugins::SqueezeDSP::UI_Functions;
 use Plugins::SqueezeDSP::Utils;
 use Plugins::SqueezeDSP::Binary;
+use Plugins::SqueezeDSP::Upsample;
+use Plugins::SqueezeDSP::WavLength;
+use Plugins::SqueezeDSP::Status;
+use Plugins::SqueezeDSP::Page;
 
 sub initPlugin {
     my $class = shift;
@@ -201,6 +274,22 @@ sub initPlugin {
 
     Plugins::SqueezeDSP::Utils::debug("plugin " . $revision . " enabled");
 
+    # Upsample picks each track's target at stream start through a wrap of LMS's command
+    # builder (Upsample.pm), so it goes in before any player's rules are written. Without it,
+    # or without an ffmpeg that has soxr, no player gets upsample rules.
+    if ( Plugins::SqueezeDSP::Upsample::install() ) {
+        my $ff = Plugins::SqueezeDSP::Upsample::ffmpegPath();
+        my $msg = $ff ? ( Plugins::SqueezeDSP::Upsample::soxr() ? "ffmpeg $ff has soxr: upsampling available"
+                                                               : "ffmpeg $ff has no soxr: upsampling unavailable" )
+                      : "no ffmpeg found: upsampling unavailable";
+        Plugins::SqueezeDSP::Utils::debug($msg);
+        my $perl = Plugins::SqueezeDSP::WavLength::perl();
+        Plugins::SqueezeDSP::Utils::debug( "PCM mode states each track's length in its WAV header (the engine's --wavlength; "
+            . ( $perl ? "a filter on $perl after a resample to the player's max)" : "after a resample to the player's max it says unknown: no perl beside LMS)" ) );
+    } else {
+        $log->warn("LMS has no tokenizeConvertCommand2 to wrap: upsampling unavailable");
+    }
+
     # Register json/CLI functions
     Slim::Control::Request::addDispatch([$thistag . '.filters'], [1, 1, 0, \&Plugins::SqueezeDSP::UI_Functions::filtersQuery]);
     Slim::Control::Request::addDispatch([$thistag . '.saveas'], [1, 1, 1, \&Plugins::SqueezeDSP::UI_Functions::saveasCommand]);
@@ -213,6 +302,8 @@ sub initPlugin {
     Slim::Control::Request::addDispatch([$thistag . '.clearlog'], [1, 1, 0, \&Plugins::SqueezeDSP::UI_Functions::clearlogCommand]);
 
 	Slim::Control::Request::addDispatch([$thistag . '.trackgain'], [1, 1, 0, \&Plugins::SqueezeDSP::Utils::_trackGainQuery]);
+    # the SqueezeDSP page's signal path and processing speed (Status.pm), polled while it is open
+    Slim::Control::Request::addDispatch([$thistag . '.status'], [1, 1, 0, \&Plugins::SqueezeDSP::Status::statusQuery]);
 
 
 
@@ -230,6 +321,10 @@ sub initPlugin {
 	Slim::Control::Request::subscribe(\&clientEventNew, [['client'],['new']]);
 	Slim::Control::Request::subscribe(\&clientEventReconnect, [['client'],['reconnect']]);
 	Slim::Control::Request::subscribe(\&syncEvent, [['sync']]);
+	# a player's Bitrate Limiting (LMS's player settings, Audio) decides whether its stream is MP3 at that limit
+	# (Configuration::reducedOutput): its rules and list follow a change at once. A client pref's change handler
+	# gets the client third (Prefs/Base.pm set, Prefs/Client.pm _obj).
+	preferences('server')->setChange( \&bitrateChange, 'maxBitrate' );
 
 	# add this for gain logging
 	#Slim::Control::Request::subscribe(\&_trackChanged, [['playlist'],['newsong']]);
@@ -237,6 +332,31 @@ sub initPlugin {
 	# will clear cache on server start, so changing js files works
 	$cacheBust = time();
 
+}
+
+# The SqueezeDSP page in Material: ONE entry, in the 'allplayers' section, opening the page inline
+# (iframe; a weblink tears off a separate window) for the player it was picked from. Material
+# shows an 'allplayers' action in each player's menu (Manage players, player settings), in the
+# main menu's player list, and as a Home tile, with $ID replaced by that player's id or the
+# current one (customactions.js getCustomActions and doReplacements, the same in 6.4.9 to 6.4.12,
+# run in JavaScriptCore 2026-10-24). So 'pinned' is not registered as well: that would be a
+# second Home tile. registerCustomAction pushes and never de-dupes, so this runs once per server
+# run, and it is reached through ->can, so a server without Material simply has no entry.
+my $materialDone;
+sub postinitPlugin {
+    return if $materialDone;
+    my $register = eval { Plugins::MaterialSkin::Plugin->can('registerCustomAction') };
+    return unless $register;
+    $materialDone = 1;
+    my $ok = eval {
+        $register->( 'allplayers', {
+            title  => Slim::Utils::Strings::string('PLUGIN_SQUEEZEDSP_DISPLAYNAME'),
+            iframe => Plugins::SqueezeDSP::Page::PATH() . '?player=$ID',
+            icon   => 'equalizer',
+        } );
+        1;
+    };
+    $log->warn("could not register the SqueezeDSP page with Material: $@") unless $ok;
 }
 
 sub shutdown {
@@ -264,6 +384,14 @@ sub clientEventReconnect {
     Plugins::SqueezeDSP::Configuration::applyClientState($client);
 }
 
+# LMS's maxBitrate pref changed for a player: ( pref, new value, client, old value )
+sub bitrateChange {
+    my ( undef, undef, $client ) = @_;
+    return unless ref $client && eval { $client->can('id') };
+    Plugins::SqueezeDSP::Utils::debug( "Bitrate Limiting changed for " . $client->name );
+    Plugins::SqueezeDSP::Configuration::applyClientState($client);
+}
+
 sub syncEvent {
     my $request = shift;
     my $client  = $request->client();
@@ -276,6 +404,8 @@ sub webPages {
     if (Slim::Utils::PluginManager->isEnabled("Plugins::SqueezeDSP::Plugin")) {
         Slim::Web::Pages->addPageFunction("plugins/SqueezeDSP/index.html", \&handleWebIndex);
         Slim::Web::Pages->addPageLinks("plugins", { $class->getDisplayName => 'plugins/SqueezeDSP/index.html' });
+        # the SqueezeDSP page, a raw handler at /squeezedsp (Page.pm); its version handed in here
+        Plugins::SqueezeDSP::Page->init($revision);
     } else {
         Slim::Web::Pages->addPageLinks("plugins", { $class->getDisplayName => undef });
         Slim::Web::Pages->addPageLinks("icons", { $class->getDisplayName => undef });

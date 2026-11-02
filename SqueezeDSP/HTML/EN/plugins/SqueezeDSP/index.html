@@ -70,6 +70,16 @@ print ( $myversion );
     <Input id="HighShelf_Desc"  readonly value='[% "PLUGIN_SQUEEZEDSP_HIGHSHELF"      | string %]'>
     <Input id="PCMNeedsHeader_Help" readonly value='[% "PLUGIN_SQUEEZEDSP_PCM_NEEDS_HEADER" | string %]'>
     <Input id="NoDSPBelowFLAC_Help" readonly value='[% "PLUGIN_SQUEEZEDSP_NO_DSP_BELOW_FLAC" | string %]'>
+    <Input id="ReducedLimit_Help"   readonly value='[% "PLUGIN_SQUEEZEDSP_REDUCED_LIMIT"   | string %]'>
+    <Input id="ReducedApp_Help"     readonly value='[% "PLUGIN_SQUEEZEDSP_REDUCED_APP"     | string %]'>
+    <Input id="UpsampleNoSoxr_Help"   readonly value='[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_SOXR"   | string %]'>
+    <Input id="UpsampleNoFfmpeg_Help" readonly value='[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_FFMPEG" | string %]'>
+    <Input id="UpsampleNoMax_Help"    readonly value='[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_MAX"    | string %]'>
+    <Input id="UpsampleNoHook_Help"   readonly value='[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_HOOK"   | string %]'>
+    <Input id="UpsampleNoReduced_Help" readonly value='[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_REDUCED" | string %]'>
+    <Input id="UpsampleTargets_Help"  readonly value='[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_TARGETS"   | string %]'>
+    <Input id="UpsampleFixed_Help"    readonly value='[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_FIXED"     | string %]'>
+    <Input id="UpsampleNoSox_Help"    readonly value='[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_SOX"    | string %]'>
 </DIV>
 
 <!-- ============================================================
@@ -88,7 +98,7 @@ print ( $myversion );
                 <div class="checkbox-group">
                     <input class="Check" type="checkbox"
                            name="val_Bypass" id="DSP" value="1"
-                           onclick="SwitchCheckbox(this, true); NewFieldValue('Bypass', this, false); ToggleControl(this, 'DSP_container', true);">
+                           onclick="SwitchCheckbox(this, true); NewFieldValue('Bypass', this, false); ToggleControl(this, 'DSP_container', true); ToggleControl(this, 'DSP_container_signal', true);">
                     <label for="DSP" class="Toggle">Toggle</label>
                 </div>
                 <button class="sqdsp-click button button-red" type="button"
@@ -102,158 +112,50 @@ print ( $myversion );
                     onclick="SqueezeDSPSaveAll(); DisplayAlert('All Settings', 'Applied', 2000);">Apply</button>
         </TD>
     </TR>
-    <!-- Output format: FLAC, or PCM as WAV with its header (only for a player that reads one) -->
-    <TR id="control_OutputFormat">
+</TABLE>
+
+<!-- ============================================================
+     SECTION: OUTPUT - FLAC, or PCM as WAV with its header (only for a player that reads one).
+     The choice in the header, like Upsample; the note under it only when there is one.
+     ============================================================ -->
+<TABLE class="table-container">
+    <TR class="row-header" id="hdr_output">
         <TD class="rowTitle">
             <div class="tooltip">
-                <label class="infoTitle">[% "PLUGIN_SQUEEZEDSP_OUTPUT" | string %]</label>
+                <span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_OUTPUT" | string %]</span>
                 <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_OUTPUT_HELP" | string %]</span>
             </div>
         </TD>
         <TD class="rowBody">
-            <div class="filter-group" id="output-selector">
+            <div class="filter-group sqdsp-choice" id="output-selector">
                 <div class="filter-type-container">
                     <label class="filter-type">
                         <input type="radio" name="outputformat" value="FLAC" checked
-                               onchange="NewFieldValue('OutputFormat', this, false); LocalSetupOutput();">
-                        <span class="full-label">FLAC 24-bit</span>
-                        <span class="abbr-label">FLAC</span>
+                               onchange="NewFieldValue('OutputFormat', this, false); LocalSetupOutput(); LocalSetupUpsample();">
+                        <span>FLAC 24-bit</span>
                     </label>
                 </div>
                 <div class="filter-type-container">
                     <label class="filter-type">
                         <input type="radio" name="outputformat" value="PCM"
-                               onchange="NewFieldValue('OutputFormat', this, false); LocalSetupOutput();">
-                        <span class="full-label">PCM (WAV 24-bit)</span>
-                        <span class="abbr-label">PCM</span>
+                               onchange="NewFieldValue('OutputFormat', this, false); LocalSetupOutput(); LocalSetupUpsample();">
+                        <span>PCM (WAV 24-bit)</span>
                     </label>
                 </div>
             </div>
-            <div id="note_OutputFormat" style="display: none; font-size: 0.85em; opacity: 0.8; margin-top: 0.3em;"></div>
         </TD>
         <TD class="rowSuffix"></TD>
     </TR>
 </TABLE>
-
-<DIV id="DSP_container">
-
-<!-- ============================================================
-     SECTION: PRESETS & FILES
-     Header row uses row-header class; body table uses section-body-table
-     to remove top border radius so header and body butt together.
-     ============================================================ -->
-<TABLE class="table-container">
-    <TR class="row-header" id="hdr_presets">
-        <TD class="rowTitle">
-            <span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_PRESETSFILES" | string %]</span>
-        </TD>
-        <TD class="rowBody">
-            <div class="checkbox-row">
-                <div class="checkbox-group">
-                    <input class="Check" type="checkbox" id="toggle_presets" checked>
-                    <label class="Toggle toggle-section" for="toggle_presets">Toggle</label>
-                </div>
-            </div>
-        </TD>
-        <TD class="rowSuffix" style="text-align: right;"><button class="sqdsp-click minibutton button-red" type="button"
-					id="btn_PresetMenu"
-					title="Preset options"
-					style="min-width:2em;padding:0 0.4em"
-					onclick="openPresetMenu(this); reStyleElement('btn_LoadPreset', 'button-amber', 'button-teal'); ">&#8942;</button></TD>
+<TABLE class="table-container section-body-table" id="body_output_note" style="display: none;">
+    <TR>
+        <TD class="rowBody sqdsp-wide" colspan="3"><div id="note_OutputFormat" class="sqdsp-note"></div></TD>
     </TR>
 </TABLE>
-<DIV id="body_presets">
-<TABLE class="table-container section-body-table">
-	<TR id="control_Preset">
-		<TD class="rowTitle">
-			<div class="tooltip">
-				<Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_CHOOSE_PRESET" | string %]</Output>
-				<span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_PRESET_HELP" | string %]</span>
-			</div>
-		</TD>
-		<TD class="rowBody">
-			<select class="sqdsp-select" id="sel_Preset"
-					onchange="reStyleElement('btn_LoadPreset', 'button-teal', 'button-amber')">
-				<option value="-">None</option>
-			</select>
-		</TD>
-		<TD class="rowSuffix" style="white-space:nowrap">
-			<button class="sqdsp-click button button-teal" type="button"
-					id="btn_LoadPreset" value="Load"
-					onclick="SqueezeDSPFetchPresetSettings(sel_Preset.value, [
-						function() { NewFieldValue('Last_preset', sel_Preset, false); },
-						function() { edt_NewPreset.value = sel_Preset.value; },
-						LocalUpdateSettings,
-						function() { reStyleElement('btn_LoadPreset', 'button-amber', 'button-teal'); },
-						function() { SqueezeDSPSaveAll(); },
-						function() { DisplayAlert('Preset', 'Applied', 2000); }
-					]);">Load</button>
-			
-		</TD>
-	</TR>
 
-    <TR id="control_NewPreset">
-        <TD class="rowTitle">
-            <div class="tooltip">
-                <Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_SAVEPRESETFILE" | string %]</Output>
-                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_PRESET_HELP" | string %]</span>
-            </div>
-        </TD>
-        <TD class="rowBody">
-            <input class="sqdsp-edit" id="edt_NewPreset" value="None" />
-        </TD>
-        <TD class="rowSuffix">
-            <button class="sqdsp-click button button-green" type="button"
-                    name="btn_NewPreset" value="Save"
-                    onclick="NewFieldValue('Last_preset', edt_NewPreset, false);
-                             SqueezeDSPSaveAll(SetNewPreset(edt_NewPreset));
-							 refreshPresetList();">Save</button>
-        </TD>
-    </TR>
-
-    <TR id="control_FIRWavFile">
-        <TD class="rowTitle">
-            <div class="tooltip">
-                <Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_ROOMCORR" | string %]</Output>
-                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_ROOMCORR_HELP" | string %]</span>
-            </div>
-        </TD>
-        <TD class="rowBody">
-            <select class="sqdsp-select" id="sel_FIRWavFile"
-                    onchange="NewFieldValue('FIRWavFile', this, false)">
-                <option value="-">None</option>
-            </select>
-        </TD>
-        <TD class="rowSuffix"></TD>
-    </TR>
-
-    <TR id="control_FIRStrength" inc="1">
-        <TD class="rowTitle">
-            <div class="tooltip">
-				<Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_FIRSTRENGTH" | string %]</Output>
-				<span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_FIRSTRENGTH_HELP" | string %]</span>
-
-            </div>
-        </TD>
-		<TD class="Slide">
-			<input class="range" type="range" orient="horizontal"
-				min="0" max="100" step="1" value="100"
-				onpointerdown="showBubble(this)" onpointerup="hideBubble(this)"
-				ondblclick="SliderReset.call(this);" onchange="iSlide(this)"
-				id="FIRStrength">
-			<output id="FIRStrengthBubble" class="bubble"></output>
-		</TD>
-        <TD class="rowSuffix">
-            <Input type="number" class="OutputVal" min="0" max="100" step="1"
-                   id="val_FIRStrength" onchange="valInputDecimal(this);"></Input>
-        </TD>
-    </TR>
-</TABLE>
-</DIV><!-- /body_presets -->
-
-
+<DIV id="DSP_container_signal">
 <!-- ============================================================
-     SECTION: SIGNAL
+     SECTION: SIGNAL (under Output; hidden with the DSP off, as the rest of DSP_container is)
      LEDs sit in rowBody beside toggle; Clear alone in rowSuffix
      ============================================================ -->
 <TABLE class="table-container">
@@ -513,6 +415,417 @@ print ( $myversion );
     </TR>
 </TABLE>
 </DIV><!-- /body_signal -->
+</DIV><!-- /DSP_container_signal -->
+
+<!-- ============================================================
+     SECTION: UPSAMPLE - before the DSP, to the player's top rate in the track's own family, or every track to its top rate.
+     The switch in the header (as DSP's), then the note (the rates, or why not); the options, one per row, only while it is on.
+     ============================================================ -->
+<TABLE class="table-container">
+    <TR class="row-header" id="hdr_upsample">
+        <TD class="rowTitle">
+            <div class="tooltip">
+                <span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_UPSAMPLE" | string %]</span>
+                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_HELP" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowBody">
+          <div class="sqdsp-choice-row">
+            <div class="checkbox-group">
+                <input class="Check" type="checkbox" id="chk_Upsample" value="off"
+                       onchange="this.value = this.checked ? 'on' : 'off'; NewFieldValue('Upsample', this, false); LocalSetupUpsample();">
+                <label for="chk_Upsample" class="Toggle">Toggle</label>
+            </div>
+            <span id="note_Upsample" class="sqdsp-desc" style="display: none;"></span>
+          </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+</TABLE>
+<DIV id="upsample-options" style="display: none;">
+<TABLE class="table-container section-body-table sqdsp-up">
+    <TR id="control_UpsampleTarget">
+        <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_TARGET" | string %]</span></TD>
+        <TD class="rowBody">
+            <div class="filter-group sqdsp-choice" id="upsample-target-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampletarget" value="family" checked
+                               onchange="NewFieldValue('UpsampleTarget', this, false); LocalSetupUpsample();">
+                        <span>Per family</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampletarget" value="fixed"
+                               onchange="NewFieldValue('UpsampleTarget', this, false); LocalSetupUpsample();">
+                        <span>Player max</span>
+                    </label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+    <TR id="control_UpsampleMax">
+        <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_MAX" | string %]</span></TD>
+        <TD class="rowBody">
+            <div class="filter-group sqdsp-choice sqdsp-even" id="upsample-max-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplemax" value="0" checked
+                               onchange="NewFieldValue('UpsampleMax', this, false); LocalSetupUpsample();">
+                        <span>[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_MAX_NONE" | string %]</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplemax" value="768000"
+                               onchange="NewFieldValue('UpsampleMax', this, false); LocalSetupUpsample();">
+                        <span>768 kHz</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplemax" value="384000"
+                               onchange="NewFieldValue('UpsampleMax', this, false); LocalSetupUpsample();">
+                        <span>384 kHz</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplemax" value="192000"
+                               onchange="NewFieldValue('UpsampleMax', this, false); LocalSetupUpsample();">
+                        <span>192 kHz</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplemax" value="96000"
+                               onchange="NewFieldValue('UpsampleMax', this, false); LocalSetupUpsample();">
+                        <span>96 kHz</span>
+                    </label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+    <TR id="control_UpsamplePhase">
+        <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_PHASE" | string %]</span></TD>
+        <TD class="rowBody">
+            <div class="filter-group sqdsp-choice" id="upsample-phase-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplephase" value="linear" checked
+                               onchange="NewFieldValue('UpsamplePhase', this, false); LocalSetupUpsample();">
+                        <span>Linear</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplephase" value="intermediate"
+                               onchange="NewFieldValue('UpsamplePhase', this, false); LocalSetupUpsample();">
+                        <span>Intermediate</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplephase" value="minimum"
+                               onchange="NewFieldValue('UpsamplePhase', this, false); LocalSetupUpsample();">
+                        <span>Minimum</span>
+                    </label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+    <TR id="control_UpsamplePrecision">
+        <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_LIVE_PRECISION" | string %]</span></TD>
+        <TD class="rowBody">
+            <div class="filter-group sqdsp-choice sqdsp-even" id="upsample-precision-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampleprecision" value="20"
+                               onchange="NewFieldValue('UpsamplePrecision', this, false);">
+                        <span>20-bit</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampleprecision" value="24"
+                               onchange="NewFieldValue('UpsamplePrecision', this, false);">
+                        <span>24-bit</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampleprecision" value="28"
+                               onchange="NewFieldValue('UpsamplePrecision', this, false);">
+                        <span>28-bit</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampleprecision" value="33"
+                               onchange="NewFieldValue('UpsamplePrecision', this, false);">
+                        <span>33-bit</span>
+                    </label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+    <TR id="control_UpsamplePassband">
+        <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_LIVE_PASSBAND" | string %]</span></TD>
+        <TD class="rowBody">
+            <div class="filter-group sqdsp-choice sqdsp-even" id="upsample-passband-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplepassband" value="0"
+                               onchange="NewFieldValue('UpsamplePassband', this, false);">
+                        <span>Auto</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplepassband" value="0.9"
+                               onchange="NewFieldValue('UpsamplePassband', this, false);">
+                        <span>90%</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplepassband" value="0.95"
+                               onchange="NewFieldValue('UpsamplePassband', this, false);">
+                        <span>95%</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplepassband" value="0.99"
+                               onchange="NewFieldValue('UpsamplePassband', this, false);">
+                        <span>99%</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsamplepassband" value="0.995"
+                               onchange="NewFieldValue('UpsamplePassband', this, false);">
+                        <span>99.5%</span>
+                    </label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+    <TR id="control_UpsampleSteep">
+        <TD class="rowTitle"><label for="chk_UpsampleSteep" class="infoTitle">[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_STEEP" | string %]</label></TD>
+        <TD class="rowBody">
+            <div class="checkbox-row">
+                <div class="checkbox-group">
+                    <input class="Check" type="checkbox" id="chk_UpsampleSteep" value="0"
+                           onchange="this.value = this.checked ? 1 : 0; NewFieldValue('UpsampleSteep', this, false);">
+                    <label for="chk_UpsampleSteep" class="Toggle">Toggle</label>
+                </div>
+                <span class="sqdsp-desc">[% "PLUGIN_SQUEEZEDSP_UPSAMPLE_STEEP_DESC" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+</TABLE>
+</DIV>
+
+<!-- ============================================================
+     SECTION: DSD - how our engine decodes a DSF (ledger OUR OWN DSD DECODER):
+     the player's DSDCutoff and DSDGain, which the engine reads at each track
+     ============================================================ -->
+<TABLE class="table-container">
+    <TR class="row-header" id="hdr_dsd">
+        <TD class="rowTitle">
+            <div class="tooltip">
+                <span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_DSD" | string %]</span>
+                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_DSD_HELP" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowBody"></TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+</TABLE>
+<TABLE class="table-container section-body-table sqdsp-up">
+    <TR id="control_DSDCutoff">
+        <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_DSD_CUTOFF" | string %]</span></TD>
+        <TD class="rowBody">
+            <div class="filter-group sqdsp-choice sqdsp-even" id="dsd-cutoff-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="dsdcutoff" value="24000"
+                               onchange="NewFieldValue('DSDCutoff', this, false);">
+                        <span>24 kHz</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="dsdcutoff" value="30000"
+                               onchange="NewFieldValue('DSDCutoff', this, false);">
+                        <span>30 kHz</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="dsdcutoff" value="50000"
+                               onchange="NewFieldValue('DSDCutoff', this, false);">
+                        <span>50 kHz</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="dsdcutoff" value="0"
+                               onchange="NewFieldValue('DSDCutoff', this, false);">
+                        <span>[% "PLUGIN_SQUEEZEDSP_DSD_NONE" | string %]</span>
+                    </label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+    <TR id="control_DSDGain">
+        <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_DSD_GAIN" | string %]</span></TD>
+        <TD class="rowBody">
+            <div class="filter-group sqdsp-choice sqdsp-even" id="dsd-gain-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="dsdgain" value="0"
+                               onchange="NewFieldValue('DSDGain', this, false);">
+                        <span>0 dB</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="dsdgain" value="6"
+                               onchange="NewFieldValue('DSDGain', this, false);">
+                        <span>+6 dB</span>
+                    </label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+</TABLE>
+
+<DIV id="DSP_container">
+
+<!-- ============================================================
+     SECTION: PRESETS & FILES
+     Header row uses row-header class; body table uses section-body-table
+     to remove top border radius so header and body butt together.
+     ============================================================ -->
+<TABLE class="table-container">
+    <TR class="row-header" id="hdr_presets">
+        <TD class="rowTitle">
+            <span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_PRESETSFILES" | string %]</span>
+        </TD>
+        <TD class="rowBody">
+            <div class="checkbox-row">
+                <div class="checkbox-group">
+                    <input class="Check" type="checkbox" id="toggle_presets" checked>
+                    <label class="Toggle toggle-section" for="toggle_presets">Toggle</label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix" style="text-align: right;"><button class="sqdsp-click minibutton button-red" type="button"
+					id="btn_PresetMenu"
+					title="Preset options"
+					style="min-width:2em;padding:0 0.4em"
+					onclick="openPresetMenu(this); reStyleElement('btn_LoadPreset', 'button-amber', 'button-teal'); ">&#8942;</button></TD>
+    </TR>
+</TABLE>
+<DIV id="body_presets">
+<TABLE class="table-container section-body-table">
+	<TR id="control_Preset">
+		<TD class="rowTitle">
+			<div class="tooltip">
+				<Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_CHOOSE_PRESET" | string %]</Output>
+				<span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_PRESET_HELP" | string %]</span>
+			</div>
+		</TD>
+		<TD class="rowBody">
+			<select class="sqdsp-select" id="sel_Preset"
+					onchange="reStyleElement('btn_LoadPreset', 'button-teal', 'button-amber')">
+				<option value="-">None</option>
+			</select>
+		</TD>
+		<TD class="rowSuffix" style="white-space:nowrap">
+			<button class="sqdsp-click button button-teal" type="button"
+					id="btn_LoadPreset" value="Load"
+					onclick="SqueezeDSPFetchPresetSettings(sel_Preset.value, [
+						function() { NewFieldValue('Last_preset', sel_Preset, false); },
+						function() { edt_NewPreset.value = sel_Preset.value; },
+						LocalUpdateSettings,
+						function() { reStyleElement('btn_LoadPreset', 'button-amber', 'button-teal'); },
+						function() { SqueezeDSPSaveAll(); },
+						function() { DisplayAlert('Preset', 'Applied', 2000); }
+					]);">Load</button>
+			
+		</TD>
+	</TR>
+
+    <TR id="control_NewPreset">
+        <TD class="rowTitle">
+            <div class="tooltip">
+                <Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_SAVEPRESETFILE" | string %]</Output>
+                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_PRESET_HELP" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowBody">
+            <input class="sqdsp-edit" id="edt_NewPreset" value="None" />
+        </TD>
+        <TD class="rowSuffix">
+            <button class="sqdsp-click button button-green" type="button"
+                    name="btn_NewPreset" value="Save"
+                    onclick="NewFieldValue('Last_preset', edt_NewPreset, false);
+                             SqueezeDSPSaveAll(SetNewPreset(edt_NewPreset));
+							 refreshPresetList();">Save</button>
+        </TD>
+    </TR>
+
+    <TR id="control_FIRWavFile">
+        <TD class="rowTitle">
+            <div class="tooltip">
+                <Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_ROOMCORR" | string %]</Output>
+                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_ROOMCORR_HELP" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowBody">
+            <select class="sqdsp-select" id="sel_FIRWavFile"
+                    onchange="NewFieldValue('FIRWavFile', this, false)">
+                <option value="-">None</option>
+            </select>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+
+    <TR id="control_FIRStrength" inc="1">
+        <TD class="rowTitle">
+            <div class="tooltip">
+				<Output class="infoTitle">[% "PLUGIN_SQUEEZEDSP_FIRSTRENGTH" | string %]</Output>
+				<span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_FIRSTRENGTH_HELP" | string %]</span>
+
+            </div>
+        </TD>
+		<TD class="Slide">
+			<input class="range" type="range" orient="horizontal"
+				min="0" max="100" step="1" value="100"
+				onpointerdown="showBubble(this)" onpointerup="hideBubble(this)"
+				ondblclick="SliderReset.call(this);" onchange="iSlide(this)"
+				id="FIRStrength">
+			<output id="FIRStrengthBubble" class="bubble"></output>
+		</TD>
+        <TD class="rowSuffix">
+            <Input type="number" class="OutputVal" min="0" max="100" step="1"
+                   id="val_FIRStrength" onchange="valInputDecimal(this);"></Input>
+        </TD>
+    </TR>
+</TABLE>
+</DIV><!-- /body_presets -->
 
 
 <!-- ============================================================
