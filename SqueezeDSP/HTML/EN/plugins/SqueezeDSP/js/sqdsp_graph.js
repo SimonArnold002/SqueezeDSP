@@ -77,9 +77,10 @@ function updatePEQGraph() {
 		let containerWidth = graphDiv.clientWidth || container?.clientWidth || 0;
 		let containerHeight = graphDiv.clientHeight || container?.clientHeight || 0;
 
-        // If layout hasn't settled yet, defer one frame
+        // If layout hasn't settled yet, defer one frame. A graph not displayed at all (its tab not shown, or no bands
+        // and no loudness) is not retried every frame: the page's ResizeObserver draws it once it has a size
         if (containerWidth === 0 || containerHeight === 0) {
-            requestAnimationFrame(() => updatePEQGraph());
+            if (container && container.getClientRects().length) requestAnimationFrame(() => updatePEQGraph());
             return;
         }
         

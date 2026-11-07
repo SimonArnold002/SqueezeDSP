@@ -68,8 +68,10 @@
     // InitialiseData), so a player first set up here gets the same file. Keep them in step.
     function defaults() {
         return {
-            Bypass: 1, OutputFormat: 'FLAC', Upsample: 'off', UpsamplePrecision: 28, UpsampleSteep: 0, DSDCutoff: 30000, DSDGain: 0,
-            UpsamplePassband: 0.99, UpsamplePhase: 'linear', UpsampleTarget: 'family', UpsampleMax: 0, Preamp: 0, Balance: 0, Width: 0,
+            Bypass: 1, OutputFormat: 'FLAC', Upsample: 'off', DSDCutoff: 30000, DSDGain: 0,
+            UpsampleDSDRate: 2822400, UpsampleFilterCD: 'short-int', UpsampleFilterHiRes: 'short-lin', DSDOut: 0, DSDOutMod: 'standard',
+            DSDOutDSP: 352800, DSDIntegrator: 'lin', UpsamplePCMFilterCD: 'short-int', UpsamplePCMFilterHiRes: 'short-lin',
+            UpsampleTarget: 'family', UpsampleMax: 0, Preamp: 0, Balance: 0, Width: 0,
             Delay: { delay: 0 }, Loudness: { enabled: 0, listening_level: 85 }, Filters: [],
             FIRWavFile: '-', Last_preset: '', Preset: 'None', FIRStrength: 100, Crossfeed: 'off',
             ReplayGain: { enabled: 0, mode: 3, fixed_gain: -6.0, spotify_gain: -4.0 }
@@ -100,19 +102,47 @@
     var PRESETS = [];       // [{ path, name }]
     var PENDING = {};       // slider values not applied yet
     var GEN = 0;            // bumped by every local change: a settings read sent before one is stale
-    var NEED = { players: true, settings: true, presets: true };
-    var T = { players: 0, settings: 0, presets: 0 };
+    var NEED = { players: true, settings: true, presets: true, logs: true };
+    var T = { players: 0, settings: 0, presets: 0, logs: 0 };
+    var PEAKS = [];         // the player's last tracks' output peaks, oldest first (squeezedsp.logsummary): { v: dBFS,
+                            // dsd: DSF out, held: its samples held at the limit }
+    var DSD_0DB = 6.02;     // DSD's 0 dB (50% modulation) over its full swing
     var UI = null;          // the built controls
 
-    var PRECISIONS = [20, 24, 28, 33];
-    var PASSBANDS = [0, 0.9, 0.95, 0.99, 0.995];
-    // the passband (Upsample.pm PASSBAND_FAMILY, PASSBAND_FIXED): per family 99% by default; a fixed target 95% by
-    // default and at most that
-    var PB_FAMILY = 0.99, PB_FIXED = 0.95;
     // a DSF on our engine's own decoder (0.3.13): its low-pass (Hz, 0 none) and gain (dB), the player's DSDCutoff and DSDGain
     var DSD_CUTOFFS = [24000, 30000, 50000, 0];
     var DSD_GAINS = [0, 6];
-    var PHASES = ['linear', 'intermediate', 'minimum'];
+    // DSD out: the converter's DSD rates (the player's UpsampleDSDRate; DSD to DSD keeps the source's own rate), the
+    // modulators (DSDOutMod) and the DSP's rate in between (DSDOutDSP)
+    var DSD_RATES = [2822400, 5644800, 11289600, 22579200];
+    var DSD_RATE_NAMES = { 2822400: 'DSD64', 5644800: 'DSD128', 11289600: 'DSD256', 22579200: 'DSD512' };
+    var DSD_MODS = ['standard', 'clans', 'adaptive'];
+    // the engine's filters (Upsample.pm @FILTERS, the engine's --upfilter), one for a source at 48 kHz and under and one
+    // for hi-res; the converter to DSD's own (0.1.72.33) and PCM's own (0.1.72.37; Simon 2026-11-04: "Separate for PCM"),
+    // with the defaults Simon asked for ("defaults set to what we consider best": ledger STAGE 1 STUDY). Since 0.1.72.44
+    // the filter family, one dropdown each (Simon 2026-11-06: "choose the filters from a drop down ... the name, lenght and
+    // phase"), in the engine's order: [value, family, length, phase]; Kaiser's values as before
+    var FILTERS = (function () {
+        var out = [];
+        [['', 'kaiser', ['short', 'long', 'xlong']], ['gauss-', 'gauss', ['short', 'medium', 'long']],
+         ['halfband-', 'halfband', ['']], ['slow-', 'slow', ['']]].forEach(function (f) {
+            f[2].forEach(function (l) {
+                ['lin', 'int', 'min'].forEach(function (p) { out.push([f[0] + (l ? l + '-' : '') + p, f[1], l, p]); });
+            });
+        });
+        out.push(['nonring', 'nonring', '', '']);
+        return out;
+    })();
+    var FILTER_PHASE_NAMES = { lin: 'Linear', int: 'Intermediate', min: 'Minimum' };
+    var FILTER_DEFAULTS = { UpsampleFilterCD: 'short-int', UpsampleFilterHiRes: 'short-lin',
+                            UpsamplePCMFilterCD: 'short-int', UpsamplePCMFilterHiRes: 'short-lin' };
+    // the settings' tabs, in Simon's order (2026-11-03: "Presets first then DSP, then the rest as they are")
+    var TABS = ['presets', 'dsp', 'src', 'pcm', 'dsd', 'peq', 'conv', 'xfeed'];
+    var TAB = null;         // the tab shown
+    // DSD out's DSP rate (DSDOutDSP): DXD, 176.4k, or native, a DSF's own DSD rate (Configuration::dsdNative); native's
+    // integrator (DSDIntegrator), the engine's names
+    var DSD_DSP_RATES = ['352800', '176400', 'native'];
+    var DSD_INTEGRATORS = ['lin', 'int', 'min', 'nonring'];
     var PHASE_NAMES = { linear: 'Linear', intermediate: 'Intermediate', minimum: 'Minimum' };
     var TARGETS = ['family', 'fixed'];
     var TARGET_NAMES = { family: 'Per family', fixed: 'Player max' };
@@ -145,8 +175,8 @@
     }
     function select(id, remember) {
         if (id === PID) { return; }
-        PID = id; CAN = null; DATA = null; STATUS = null; PRESETS = []; PENDING = {};
-        NEED.settings = true; NEED.presets = true;
+        PID = id; CAN = null; DATA = null; STATUS = null; PRESETS = []; PENDING = {}; PEAKS = [];
+        NEED.settings = true; NEED.presets = true; NEED.logs = true;
         if (remember && window.history && window.history.replaceState) {
             try { window.history.replaceState(null, '', '?player=' + encodeURIComponent(id)); } catch (e) {}
         }
@@ -180,11 +210,13 @@
                 upTargets: r.up_targets || '',
                 upFixed: r.up_fixed || '',
                 upLimits: r.up_limits || '',
-                upFfmpeg: r.up_ffmpeg || '',
-                upSox: r.up_sox || '',
                 // a reduced stream (MP3, OPS, OGG), and the Bitrate Limiting an MP3 is at (0: an app's 320 kbps)
                 outReduced: r.out_reduced || '',
-                outKbps: num(r.out_kbps, 0)
+                outKbps: num(r.out_kbps, 0),
+                // native DSD out: a player that lists dsf itself, its output not a reduced stream (an older server: none)
+                dsdOutOk: num(r.dsd_out_ok, 0) === 1,
+                // the Sample Rate Converter to DSD: DSD out, and the resampler (an older server: none)
+                upDsdOk: num(r.up_dsd_ok, 0) === 1
             };
             // a change of ours went out after this was asked for, or is still going out
             if (gen !== GEN || SAVE.busy) { renderControls(); return; }
@@ -197,6 +229,26 @@
             delete DATA.fresh_player;
             renderControls();
             renderPresets();
+        });
+    }
+
+    // the engine's end-of-track lines for this player (UI_Functions::logsummaryQuery: up to 10, oldest first): each
+    // finished track's output peak, which the clipping row shows (the classic page's peak bars)
+    function loadLogs() {
+        var pid = PID;
+        return rpc(pid, ['squeezedsp.logsummary']).then(function (r) {
+            if (pid !== PID) { return; }
+            var n = num(r.trackcount, 0), out = [];
+            for (var i = 1; i <= n; i++) {
+                var v = num(r['peakdBfs_' + i], NaN);
+                if (!isFinite(v)) { continue; }
+                // a DSF track's peak is against DSD's full swing: read against DSD's 0 dB (50%, where PCM full scale
+                // goes: TemplateConfig's --dsdoutgain=-6.02), as the same track on PCM out would read
+                var dsd = /^dsf$/i.test(String(r['outtype_' + i] || ''));
+                out.push({ v: dsd ? v + DSD_0DB : v, dsd: dsd, held: dsd ? num(r['held_' + i], 0) : 0 });
+            }
+            PEAKS = out;
+            renderStatus();
         });
     }
 
@@ -235,7 +287,8 @@
     // for the next turn. Still one request at a time: each waits for the one before.
     var STEPS = [['players', 30000, function () { return loadPlayers(); }],
                  ['settings', 10000, function () { return loadSettings(); }],
-                 ['presets', 60000, function () { return loadPresets(); }]];
+                 ['presets', 60000, function () { return loadPresets(); }],
+                 ['logs', 15000, function () { return loadLogs(); }]];
 
     function housekeeping(periodicDone) {
         var now = Date.now();
@@ -356,6 +409,13 @@
         }
         UI = {};
 
+        // DSP on or off, first, so every tab has it (Simon 2026-11-05: "The DSP on button needs to move to top of UI so
+        // its availble on each page like the classic menu"); its settings stay on the DSP tab
+        var db = make('div', 'card dspbar');
+        UI.dsp = control(db, 'dsp', L.dsp || 'DSP', L.dspHelp);
+        UI.dspSw = UI.dsp.c.appendChild(switchButton(function (on) { change('Bypass', on ? 0 : 1); }));
+        app.appendChild(db);
+
         // the signal path, and its speed as the headline
         var st = make('div', 'card status');
         st.appendChild(make('h2', null, L.path || 'Signal path'));
@@ -367,13 +427,12 @@
         var sp = make('div', 'speed');
         sp.appendChild(make('span', 'speed-k', L.speed || 'Processing speed'));
         UI.speed = sp.appendChild(make('span', 'speed-v none', '-'));
-        UI.speedSub = sp.appendChild(make('span', 'speed-s'));
         st.appendChild(sp);
         UI.statusNote = st.appendChild(make('div', 'note'));
         var rows = make('div', 'rows');
         UI.rows = {};
-        [['source', L.source || 'Source'], ['up', L.upsample || 'Upsample'], ['dsp', L.dsp || 'DSP'],
-         ['out', L.output || 'Output'], ['stages', L.stages || 'Stages']].forEach(function (r) {
+        [['source', L.source || 'Source'], ['up', L.tabSrc || 'SRC'], ['dsp', L.dsp || 'DSP'],
+         ['out', L.output || 'Output'], ['stages', L.stages || 'Stages'], ['clip', L.clipping || 'Clipping']].forEach(function (r) {
             var row = make('div', 'row hide');
             row.appendChild(make('div', 'k', r[1]));
             var v = row.appendChild(make('div', 'v'));
@@ -383,48 +442,63 @@
         st.appendChild(rows);
         app.appendChild(st);
 
-        // the controls
-        var cc = make('div', 'card controls');
-        UI.dsp = control(cc, 'dsp', L.dsp || 'DSP', L.dspHelp);
-        UI.dspSw = UI.dsp.c.appendChild(switchButton(function (on) { change('Bypass', on ? 0 : 1); }));
-        UI.dspOff = cc.appendChild(make('div', 'note'));
+        // the settings, a tab per category (Simon 2026-11-03: "for this view we need tabs per settings category",
+        // "Presets first then DSP, then the rest as they are"); the last one used comes back
+        var bar = make('div', 'tabs');
+        bar.setAttribute('role', 'tablist');
+        UI.tabs = {};
+        UI.panes = {};
+        var names = { presets: L.presets || 'Presets', dsp: L.tabDsp || 'DSP', src: L.tabSrc || 'SRC', pcm: L.tabPcm || 'PCM',
+                      dsd: L.tabDsd || 'DSD', peq: L.tabPeq || 'PEQ', conv: L.tabConv || 'Convolution', xfeed: L.tabXfeed || 'Crossfeed' };
+        // the short names' full ones, on hover (Simon: "use SRC for SampleRateConverter and leave the others as PCM and DSD")
+        var titles = { src: L.src, pcm: L.pcmProc, dsd: L.dsdProc };
+        TABS.forEach(function (t) {
+            var b = make('button', 'tab', names[t]);
+            b.type = 'button';
+            b.setAttribute('role', 'tab');
+            b.dataset.t = t;
+            if (titles[t]) { b.title = titles[t]; }
+            b.addEventListener('click', function () { showTab(t); });
+            bar.appendChild(b);
+            UI.tabs[t] = b;
+        });
+        app.appendChild(bar);
+        function pane(key, title, help) {
+            var p = make('div', 'card tabpane');
+            p.dataset.t = key;
+            var h = p.appendChild(make('h2', null, title));
+            if (help) { h.title = help; }
+            app.appendChild(p);
+            UI.panes[key] = p;
+            return p;
+        }
 
-        UI.out = control(cc, 'output', L.output || 'Output', L.outputHelp);
-        UI.outSeg = segment(UI.out.c, [['FLAC', 'FLAC 24-bit'], ['PCM', 'PCM (WAV 24-bit)']],
-                            function (v) { change('OutputFormat', v); });
+        // Presets
+        var pc = pane('presets', L.presets || 'Presets');
+        pc.classList.add('presets');
+        // no row labels here: the buttons say what each row does
+        var pl = control(pc, 'load', '');
+        UI.presetSel = pl.c.appendChild(make('select'));
+        UI.presetSel.setAttribute('aria-label', L.presets || 'Presets');
+        UI.presetLoad = pl.c.appendChild(make('button', 'btn', L.load || 'Load'));
+        UI.presetDel = pl.c.appendChild(make('button', 'btn', L.del || 'Delete'));
+        UI.presetLoad.type = UI.presetDel.type = 'button';
+        UI.presetNote = pc.appendChild(make('div', 'note'));
+        var ps = control(pc, 'saveas', '');
+        UI.presetName = ps.c.appendChild(make('input'));
+        UI.presetName.type = 'text';
+        UI.presetName.placeholder = L.presetName || 'Preset name';
+        UI.presetName.setAttribute('aria-label', L.presetName || 'Preset name');
+        UI.presetSave = ps.c.appendChild(make('button', 'btn', L.saveAs || 'Save as'));
+        UI.presetSave.type = 'button';
+        UI.presetLoad.addEventListener('click', loadPreset);
+        UI.presetDel.addEventListener('click', deletePreset);
+        UI.presetSave.addEventListener('click', savePreset);
+        UI.presetName.addEventListener('keydown', function (e) { if (e.key === 'Enter') { savePreset(); } });
 
-        UI.up = control(cc, 'upsample', L.upsample || 'Upsample', L.upHelp);
-        UI.upSw = UI.up.c.appendChild(switchButton(function (on) { change('Upsample', on ? 'on' : 'off'); }));
-        UI.upOpts = cc.appendChild(make('div', 'upopts'));
-        UI.target = control(UI.upOpts, 'target', L.target || 'Target rate', null, true);
-        UI.targetSeg = segment(UI.target.c, TARGETS.map(function (t) { return [t, TARGET_NAMES[t]]; }),
-                               function (v) { change('UpsampleTarget', v); });
-        UI.max = control(UI.upOpts, 'max', L.max || 'Max rate', null, true);
-        UI.maxSeg = segment(UI.max.c, MAXRATES.map(function (m) { return [String(m), m ? rate(m) : (L.maxNone || 'No limit')]; }),
-                            function (v) { change('UpsampleMax', Number(v)); });
-        UI.phase = control(UI.upOpts, 'phase', L.phase || 'Phase', null, true);
-        UI.phaseSeg = segment(UI.phase.c, PHASES.map(function (p) { return [p, PHASE_NAMES[p]]; }),
-                              function (v) { change('UpsamplePhase', v); });
-        UI.prec = control(UI.upOpts, 'precision', L.precision || 'Precision', null, true);
-        UI.precSeg = segment(UI.prec.c, PRECISIONS.map(function (p) { return [String(p), p + '-bit']; }),
-                             function (v) { change('UpsamplePrecision', Number(v)); });
-        UI.pb = control(UI.upOpts, 'passband', L.passband || 'Passband', null, true);
-        UI.pbSeg = segment(UI.pb.c, PASSBANDS.map(function (p) {
-            return [String(p), p ? (Math.round(p * 1000) / 10) + '%' : (L.pbDefault || 'Auto')];
-        }), function (v) { change('UpsamplePassband', Number(v)); });
-        UI.steep = control(UI.upOpts, 'steep', L.steep || 'Steep (Chebyshev)', null, true);
-        UI.steepSw = UI.steep.c.appendChild(switchButton(function (on) { change('UpsampleSteep', on ? 1 : 0); }));
-
-        // DSD: how our engine decodes a DSF (ledger OUR OWN DSD DECODER); the engine reads them at each track
-        UI.dsd = control(cc, 'dsd', L.dsd || 'DSD', L.dsdHelp);
-        UI.dsdOpts = cc.appendChild(make('div', 'dsdopts'));
-        UI.dsdCut = control(UI.dsdOpts, 'dsdcutoff', L.dsdCutoff || 'Low-pass', null, true);
-        UI.dsdCutSeg = segment(UI.dsdCut.c, DSD_CUTOFFS.map(function (h) { return [String(h), h ? rate(h) : (L.dsdNone || 'None')]; }),
-                               function (v) { change('DSDCutoff', Number(v)); });
-        UI.dsdGain = control(UI.dsdOpts, 'dsdgain', L.dsdGain || 'Gain', null, true);
-        UI.dsdGainSeg = segment(UI.dsdGain.c, DSD_GAINS.map(function (g) { return [String(g), (g > 0 ? '+' : '') + g + ' dB']; }),
-                                function (v) { change('DSDGain', Number(v)); });
-
+        // DSP: its settings (on or off is at the top; the rest still on the classic page)
+        var cc = pane('dsp', L.dsp || 'DSP', L.dspHelp);
+        cc.classList.add('controls');
         UI.sliders = {};
         [['Preamp', L.preamp || 'Preamp (dB)', L.preampHelp, -30, 0, ' dB'],
          ['Balance', L.balance || 'Balance', L.balanceHelp, -12, 12, ''],
@@ -458,31 +532,78 @@
             renderControls();
             save();
         });
-        app.appendChild(cc);
+        classicLink(cc, L.dspClassic || 'ReplayGain, delay and loudness are on the classic page for now.');
 
-        // presets
-        var pc = make('div', 'card presets');
-        pc.appendChild(make('h2', null, L.presets || 'Presets'));
-        // no row labels here: the buttons say what each row does
-        var pl = control(pc, 'load', '');
-        UI.presetSel = pl.c.appendChild(make('select'));
-        UI.presetSel.setAttribute('aria-label', L.presets || 'Presets');
-        UI.presetLoad = pl.c.appendChild(make('button', 'btn', L.load || 'Load'));
-        UI.presetDel = pl.c.appendChild(make('button', 'btn', L.del || 'Delete'));
-        UI.presetLoad.type = UI.presetDel.type = 'button';
-        UI.presetNote = pc.appendChild(make('div', 'note'));
-        var ps = control(pc, 'saveas', '');
-        UI.presetName = ps.c.appendChild(make('input'));
-        UI.presetName.type = 'text';
-        UI.presetName.placeholder = L.presetName || 'Preset name';
-        UI.presetName.setAttribute('aria-label', L.presetName || 'Preset name');
-        UI.presetSave = ps.c.appendChild(make('button', 'btn', L.saveAs || 'Save as'));
-        UI.presetSave.type = 'button';
-        UI.presetLoad.addEventListener('click', loadPreset);
-        UI.presetDel.addEventListener('click', deletePreset);
-        UI.presetSave.addEventListener('click', savePreset);
-        UI.presetName.addEventListener('keydown', function (e) { if (e.key === 'Enter') { savePreset(); } });
-        app.appendChild(pc);
+        // Sample Rate Converter: off, PCM (its target and max rate) or DSD (its rate)
+        var sc = pane('src', L.src || 'Sample Rate Converter', L.srcHelp);
+        sc.classList.add('controls');
+        UI.srcOffNote = sc.appendChild(make('div', 'note dspoffnote'));
+        UI.src = control(sc, 'src', L.convertTo || 'Convert to', L.srcHelp);
+        UI.srcSeg = segment(UI.src.c, [['off', L.off || 'Off'], ['pcm', 'PCM'], ['dsd', 'DSD']], function (v) {
+            change('Upsample', v === 'pcm' ? 'on' : v);
+        });
+        UI.upOpts = sc.appendChild(make('div', 'upopts'));
+        UI.target = control(UI.upOpts, 'target', L.target || 'Target rate', null, true);
+        UI.targetSeg = segment(UI.target.c, TARGETS.map(function (t) { return [t, TARGET_NAMES[t]]; }),
+                               function (v) { change('UpsampleTarget', v); });
+        UI.max = control(UI.upOpts, 'max', L.max || 'Max rate', null, true);
+        UI.maxSeg = segment(UI.max.c, MAXRATES.map(function (m) { return [String(m), m ? rate(m) : (L.maxNone || 'No limit')]; }),
+                            function (v) { change('UpsampleMax', Number(v)); });
+        // its filters (0.1.72.37, PCM's own): the engine takes every track to its target itself, up or down, by the one for
+        // the track's rate; with the converter's PCM options, as DSD's are with its DSD ones (Simon 2026-11-05: "PCM
+        // filters should also be on SRC and show when in PCM mode, Like they do for DSD")
+        UI.filters = {};
+        filterGroups(UI.upOpts, [['UpsamplePCMFilterCD', L.filterCd || 'Filter, 44.1/48 kHz sources'],
+                                 ['UpsamplePCMFilterHiRes', L.filterHiRes || 'Filter, hi-res sources']], true);
+        UI.dsdOpts = sc.appendChild(make('div', 'dsdopts'));
+        UI.dsdRate = control(UI.dsdOpts, 'dsdrate', L.dsdRate || 'DSD rate', null, true);
+        UI.dsdRateSeg = segment(UI.dsdRate.c, DSD_RATES.map(function (r) { return [String(r), DSD_RATE_NAMES[r]]; }),
+                                function (v) { change('UpsampleDSDRate', Number(v)); });
+        // its filters: the engine takes every PCM track to 705.6k itself, by the one for the track's rate
+        filterGroups(UI.dsdOpts, [['UpsampleFilterCD', L.filterCd || 'Filter, 44.1/48 kHz sources'],
+                                  ['UpsampleFilterHiRes', L.filterHiRes || 'Filter, hi-res sources']], true);
+
+        // PCM Processing: the output (its resampler's filters are the converter's, on the SRC tab)
+        var pp = pane('pcm', L.pcmProc || 'PCM Processing Settings', L.pcmProcHelp);
+        pp.classList.add('controls');
+        UI.pcmOffNote = pp.appendChild(make('div', 'note dspoffnote'));
+        UI.out = control(pp, 'output', L.output || 'Output', L.outputHelp);
+        UI.outSeg = segment(UI.out.c, [['FLAC', 'FLAC 24-bit'], ['PCM', 'PCM (WAV 24-bit)']],
+                            function (v) { change('OutputFormat', v); });
+
+        // DSD Processing: the output (with the converter off), the decoder, the encoder
+        var dp = pane('dsd', L.dsdProc || 'DSD Processing Settings', L.dsdProcHelp);
+        dp.classList.add('controls');
+        UI.dsdOffNote = dp.appendChild(make('div', 'note dspoffnote'));
+        UI.dsdOutput = control(dp, 'dsdoutput', L.output || 'Output');
+        UI.dsdOutputSeg = segment(UI.dsdOutput.c, [['pcm', L.dsdToPcm || 'DSD to PCM'], ['dsd', L.dsdToDsd || 'DSD to DSD']],
+                                  function (v) { change('DSDOut', v === 'dsd' ? 1 : 0); });
+        dp.appendChild(make('div', 'grp', L.decoder || 'Decoder'));
+        UI.dsdCut = control(dp, 'dsdcutoff', L.dsdCutoff || 'Low-pass');
+        UI.dsdCutSeg = segment(UI.dsdCut.c, DSD_CUTOFFS.map(function (h) { return [String(h), h ? rate(h) : (L.dsdNone || 'None')]; }),
+                               function (v) { change('DSDCutoff', Number(v)); });
+        UI.dsdGain = control(dp, 'dsdgain', L.dsdGain || 'Gain');
+        UI.dsdGainSeg = segment(UI.dsdGain.c, DSD_GAINS.map(function (g) { return [String(g), (g > 0 ? '+' : '') + g + ' dB']; }),
+                                function (v) { change('DSDGain', Number(v)); });
+        UI.dsdInt = control(dp, 'dsdintegrator', L.dsdIntegrator || 'Integrator');
+        UI.dsdIntSeg = segment(UI.dsdInt.c, DSD_INTEGRATORS.map(function (i) { return [i, integratorName(i)]; }),
+                               function (v) { change('DSDIntegrator', v); });
+        dp.appendChild(make('div', 'grp', L.encoder || 'Encoder'));
+        UI.dsdMod = control(dp, 'dsdoutmod', L.dsdOutMod || 'Modulator');
+        UI.dsdModSeg = segment(UI.dsdMod.c, [['standard', L.dsdOutStandard || 'Standard'], ['clans', 'CLANS'],
+                                             ['adaptive', L.dsdOutAdaptive || 'Adaptive']],
+                               function (v) { change('DSDOutMod', v); });
+        UI.dsdDsp = control(dp, 'dsdoutdsp', L.dsdOutDsp || 'DSP rate');
+        UI.dsdDspSeg = segment(UI.dsdDsp.c, DSD_DSP_RATES.map(function (r) {
+                                   return [r, r === '352800' ? 'DXD 352.8 kHz' : r === 'native' ? (L.dsdNative || 'Native') : rate(r)];
+                               }), function (v) { change('DSDOutDSP', v === 'native' ? v : Number(v)); });
+
+        // PEQ, Convolution, Crossfeed: still on the classic page (Simon 2026-11-03: "PEQ and Filters each have their own
+        // tabs as PEQ and Convolution", "as would crossfeed")
+        [['peq', L.tabPeq || 'PEQ', L.peqClassic], ['conv', L.tabConv || 'Convolution', L.convClassic],
+         ['xfeed', L.tabXfeed || 'Crossfeed', L.xfeedClassic]].forEach(function (t) {
+            classicLink(pane(t[0], t[1]), t[2] || '');
+        });
 
         // the rest is on the classic page
         var more = make('div', 'more');
@@ -491,15 +612,76 @@
         more.appendChild(a);
         app.appendChild(more);
 
-        [UI.dsp, UI.up, UI.steep].forEach(function (c) { c.row.classList.add('sw-row'); });
+        UI.dsp.row.classList.add('sw-row');
+        var saved = null;
+        try { saved = window.localStorage.getItem('sqdsp-tab'); } catch (e) { saved = null; }
+        showTab(TAB || saved || 'presets');
         renderControls();
         renderPresets();
         renderStatus();
     }
 
+    // A filter choice per group (the engine's --upfilter): one dropdown of the filters, grouped by family, labelled by
+    // the group. sub: the rows as sub-rows (the converter's options).
+    function filterGroups(parent, groups, sub) {
+        groups.forEach(function (g) {
+            var key = g[0], row = control(parent, key, g[1], null, sub), sel = row.c.appendChild(make('select', 'filter'));
+            var group = null;
+            sel.setAttribute('aria-label', g[1]);
+            FILTERS.forEach(function (f) {
+                if (!group || group.dataset.f !== f[1]) {
+                    group = sel.appendChild(make('optgroup'));
+                    group.dataset.f = f[1];
+                    group.label = familyName(f[1]);
+                }
+                var o = group.appendChild(make('option', null, filterName(f[0])));
+                o.value = f[0];
+            });
+            sel.addEventListener('change', function () { change(key, sel.value); });
+            UI.filters[key] = sel;
+        });
+    }
+
+    function familyName(f) {
+        return { kaiser: L.filterKaiser || 'Kaiser', gauss: L.filterGauss || 'Gaussian', halfband: L.filterHalfBand || 'Half-band',
+                 slow: L.filterSlow || 'Slow roll-off', nonring: L.filterNonRinging || 'Non-ringing' }[f] || f;
+    }
+
+    // a filter as the page names it: "Kaiser · Short · Linear", "Non-ringing"
+    function filterName(v) {
+        for (var i = 0; i < FILTERS.length; i++) {
+            var f = FILTERS[i];
+            if (f[0] !== v) { continue; }
+            var len = { short: L.filterShort || 'Short', medium: L.filterMedium || 'Medium', long: L.filterLong || 'Long',
+                        xlong: L.filterXLong || 'Extra-long' }[f[2]];
+            return [familyName(f[1]), len, FILTER_PHASE_NAMES[f[3]]].filter(Boolean).join(' · ');
+        }
+        return v;
+    }
+
     function nameOf(id) {
         for (var i = 0; i < PLAYERS.length; i++) { if (PLAYERS[i].id === id) { return PLAYERS[i].name; } }
         return id;
+    }
+
+    // one tab shown, the last one used remembered in this browser
+    function showTab(key) {
+        if (!UI || !UI.panes[key]) { key = 'presets'; }
+        TAB = key;
+        Object.keys(UI.panes).forEach(function (k) {
+            UI.panes[k].classList.toggle('on', k === key);
+            UI.tabs[k].setAttribute('aria-selected', k === key ? 'true' : 'false');
+        });
+        try { window.localStorage.setItem('sqdsp-tab', key); } catch (e) {}
+    }
+
+    // what is still on the classic page: said so, and a link to it
+    function classicLink(parent, text) {
+        var m = parent.appendChild(make('div', 'note classic'));
+        if (text) { m.appendChild(make('span', null, text + ' ')); }
+        var a = m.appendChild(make('a', null, L.openClassic || 'Open the classic page'));
+        a.href = '/plugins/SqueezeDSP/index.html?player=' + encodeURIComponent(PID);
+        return m;
     }
 
     function control(parent, key, label, help, sub) {
@@ -577,27 +759,35 @@
 
     // what the server will actually do with a stored value (Upsample::options, Configuration.pm)
     function effective(c, can) {
-        var p = num(c.UpsamplePrecision, 28);
-        if (PRECISIONS.indexOf(p) < 0) { p = 28; }
         var tg = String(c.UpsampleTarget || '').toLowerCase();
         if (TARGETS.indexOf(tg) < 0) { tg = 'family'; }
-        // the passband: the target's default for none or one without a button; a fixed target plays at most 95%
-        var pbDef = tg === 'fixed' ? PB_FIXED : PB_FAMILY;
-        var pb = num(c.UpsamplePassband, pbDef);
-        var pbOk = false;
-        PASSBANDS.forEach(function (x) { if (Math.abs(x - pb) < 0.0005) { pb = x; pbOk = true; } });
-        if (!pbOk) { pb = pbDef; }
-        if (tg === 'fixed' && pb > PB_FIXED) { pb = PB_FIXED; }
-        var ph = String(c.UpsamplePhase || '').toLowerCase();
-        if (PHASES.indexOf(ph) < 0 || (ph !== 'linear' && !can.upSox)) { ph = 'linear'; }
-        var steep = /^(1|on|true)$/i.test(String(c.UpsampleSteep));
+        // the converter's mode as stored (Upsample::mode: 'on' PCM, 'dsd' DSD, else off) and as the server runs it: PCM
+        // needs the stream-start hook and the player's top rate, DSD the player's DSD and the hook (dsdSpec; the engine
+        // resamples for both, no soxr: 0.1.72.33, 0.1.72.37); and its DSD rate (Upsample::options): one of the four, in
+        // digits alone, else DSD64
+        var want = converter(c);
+        var mode = (want === 'pcm' && can.upOk) ? 'pcm' : (want === 'dsd' && can.upDsdOk) ? 'dsd' : 'off';
+        var dr = /^\d+$/.test(String(c.UpsampleDSDRate)) ? Number(c.UpsampleDSDRate) : 2822400;
+        if (DSD_RATES.indexOf(dr) < 0) { dr = 2822400; }
         // the max rate: one the server knows, at or below the player's top rate for its output (up_limits:
         // FLAC out, WAV out); above it, the player's own
         var limits = String(can.upLimits || '').split(',');
         var limit = num(c.OutputFormat === 'PCM' && can.wavOk ? limits[1] : limits[0], 0);
         var mx = num(c.UpsampleMax, 0);
         if (MAXRATES.indexOf(mx) < 0 || (limit && mx > limit)) { mx = 0; }
-        return { precision: p, passband: pb, phase: ph, steep: steep, target: tg, max: mx, limit: limit };
+        return { target: tg, max: mx, limit: limit, want: want, mode: mode, dsdrate: dr };
+    }
+
+    // an engine filter as the plugin reads it (Upsample::filters, pcmFilters): one of FILTERS, in any case, else its default
+    function filterOf(c, key) {
+        var v = String(c && c[key] != null ? c[key] : '').toLowerCase();
+        return FILTERS.some(function (f) { return f[0] === v; }) ? v : FILTER_DEFAULTS[key];
+    }
+
+    // the Sample Rate Converter's mode as the plugin reads the player's Upsample (Upsample::mode)
+    function converter(c) {
+        var v = String(c.Upsample == null ? '' : c.Upsample).toLowerCase();
+        return v === 'on' ? 'pcm' : v === 'dsd' ? 'dsd' : 'off';
     }
 
     // the targets the server writes under a limit and a max rate (Upsample::targets): the highest rate of each
@@ -615,68 +805,107 @@
 
     function whyNoUpsample(can) {
         if (can.upWhy === 'reduced') { return L.noUpReduced || ''; }
-        if (can.upWhy === 'nosoxr') { return (L.noSoxr || '') + (can.upFfmpeg ? ' ' + can.upFfmpeg : ''); }
         if (can.upWhy === 'nomax') { return L.noMax || ''; }
         if (can.upWhy === 'hook') { return L.noHook || ''; }
-        return L.noFfmpeg || '';
+        return '';
     }
 
     function renderControls() {
         if (!UI) { return; }
         var c = client(), can = CAN;
         var ready = !!(c && can);
-        var cardCtl = UI.dsp.row.parentNode;
-        cardCtl.classList.toggle('dimmed', !ready);
+        Object.keys(UI.panes).forEach(function (k) { if (k !== 'presets') { UI.panes[k].classList.toggle('dimmed', !ready); } });
         if (!ready) {
-            [UI.dspSw, UI.upSw, UI.steepSw].forEach(function (b) { b.disabled = true; });
+            UI.dspSw.disabled = true;
             return;
         }
         var dspOn = String(c.Bypass) === '0';
         setSwitch(UI.dspSw, dspOn && can.dspOk, !can.dspOk);
         UI.dsp.note.textContent = can.dspOk ? '' : (L.noDsp || '');
-        UI.dspOff.textContent = (can.dspOk && !dspOn) ? (L.dspOffNote || '') : '';
 
+        // the Sample Rate Converter as the server runs it (effective): one it cannot run shows as off, and says why
+        var e = effective(c, can);
+        var want = e.want, mode = e.mode;
+        var noDsd = !can.dsdOutOk ? (can.outReduced ? (L.dsdOutNoReduced || '') : (L.dsdOutNoDsf || '')) : whyNoUpsample(can);
+        setSegment(UI.srcSeg, mode, [].concat(can.upOk ? [] : ['pcm'], can.upDsdOk ? [] : ['dsd']));
+        UI.srcSeg.pcm.title = can.upOk ? '' : whyNoUpsample(can);
+        UI.srcSeg.dsd.title = can.upDsdOk ? '' : noDsd;
+        UI.upOpts.classList.toggle('hide', mode !== 'pcm');
+        UI.dsdOpts.classList.toggle('hide', mode !== 'dsd');
+        var ur = upRates(e.limit, e.max), note = '';
+        if (mode === 'pcm') {
+            note = (e.target === 'fixed' && (ur || can.upFixed)) ? (L.fixed || '') + ' ' + rate(ur ? ur.top : can.upFixed)
+                 : can.upTargets ? (L.targets || '') + ' ' + (ur ? [ur.f44, ur.f48] : can.upTargets.split(',')).map(rate).join(' / ') : '';
+        }
+        // the choice stored that cannot run here: why
+        if (want === 'pcm' && mode !== 'pcm') { note = whyNoUpsample(can); }
+        if (want === 'dsd' && mode !== 'dsd') { note = noDsd; }
+        UI.src.note.textContent = note;
+        setSegment(UI.targetSeg, e.target);
+        setSegment(UI.maxSeg, String(e.max), MAXRATES.filter(function (m) { return m && e.limit && m > e.limit; }).map(String));
+        setSegment(UI.dsdRateSeg, String(e.dsdrate));
+        Object.keys(UI.filters).forEach(function (key) {
+            if (document.activeElement !== UI.filters[key]) { UI.filters[key].value = filterOf(c, key); }
+        });
+
+        // PCM processing: the output (every track's but on the converter to DSD)
         var pcm = c.OutputFormat === 'PCM' && can.wavOk;
         setSegment(UI.outSeg, pcm ? 'PCM' : 'FLAC', can.wavOk ? [] : ['PCM']);
         // a reduced stream overrides the output chosen here while it is due (Bitrate Limiting, or the app's own list)
-        UI.out.note.textContent = can.outReduced
+        UI.out.note.textContent = mode === 'dsd' ? ''
+            : can.outReduced
             ? (can.outReduced === 'MP3' && can.outKbps ? fmt(L.reducedLimit || '%s', can.outKbps)
                                                       : fmt(L.reducedApp || '%s', REDUCED[can.outReduced] || can.outReduced))
             : (can.wavOk ? '' : (L.pcmNeeds || ''));
+        UI.out.row.classList.toggle('overridden', mode === 'dsd');
 
-        var upOn = c.Upsample === 'on' && can.upOk;
-        var e = effective(c, can);
-        var ur = upRates(e.limit, e.max);
-        setSwitch(UI.upSw, upOn, !can.upOk);
-        UI.upOpts.classList.toggle('hide', !upOn);
-        if (!can.upOk) {
-            UI.up.note.textContent = whyNoUpsample(can);
-        } else if (upOn && e.target === 'fixed' && (ur || can.upFixed)) {
-            UI.up.note.textContent = (L.fixed || '') + ' ' + rate(ur ? ur.top : can.upFixed);
-        } else if (upOn && can.upTargets) {
-            UI.up.note.textContent = (L.targets || '') + ' ' + (ur ? [ur.f44, ur.f48] : can.upTargets.split(',')).map(rate).join(' / ');
-        } else {
-            UI.up.note.textContent = '';
-        }
-        setSegment(UI.targetSeg, e.target);
-        setSegment(UI.maxSeg, String(e.max), MAXRATES.filter(function (m) { return m && e.limit && m > e.limit; }).map(String));
-        setSegment(UI.phaseSeg, e.phase, can.upSox ? [] : ['intermediate', 'minimum']);
-        UI.phase.note.textContent = can.upSox ? '' : (L.noSox || '');
-        setSegment(UI.precSeg, String(e.precision));
-        setSegment(UI.pbSeg, String(e.passband), e.target === 'fixed' ? PASSBANDS.filter(function (x) { return x > PB_FIXED; }).map(String) : []);
-        setSwitch(UI.steepSw, e.steep, false);
+        // DSD processing: the output, only with the converter off (Configuration::dsdOut); a player that cannot take DSD
+        // gets PCM, and says why; the decoder; the encoder, as the plugin and the engine take them
+        var dsdOutOn = can.dsdOutOk && dsdOut(c);
+        setSegment(UI.dsdOutputSeg, dsdOutOn ? 'dsd' : 'pcm', can.dsdOutOk ? [] : ['dsd']);
+        UI.dsdOutput.note.textContent = (mode !== 'off' || can.dsdOutOk) ? ''
+            : (can.outReduced ? (L.dsdOutNoReduced || '') : (L.dsdOutNoDsf || ''));
+        UI.dsdOutput.row.classList.toggle('overridden', mode !== 'off');
         setSegment(UI.dsdCutSeg, String(dsdCutoff(c)));
         setSegment(UI.dsdGainSeg, String(dsdGain(c)));
+        setSegment(UI.dsdModSeg, dsdOutMod(c));
+        setSegment(UI.dsdDspSeg, String(dsdOutDsp(c)));
+        // the integrator: native's alone, greyed (still editable) with its why on the other DSP rates
+        var native = dsdOutDsp(c) === 'native';
+        setSegment(UI.dsdIntSeg, dsdIntegrator(c));
+        UI.dsdInt.row.classList.toggle('dimmed', !native);
+        UI.dsdInt.note.textContent = native ? '' : (L.dsdNativeOnly || 'With the DSP rate Native');
 
-        // what DSP on drives: dimmed while it is off, still editable
-        [UI.up.row, UI.upOpts, UI.dsd.row, UI.dsdOpts].concat(Object.keys(UI.sliders).map(function (k) { return UI.sliders[k].ctl.row; }))
-            .forEach(function (r) { r.classList.toggle('dimmed', !dspOn); });
+        // what DSP on drives: dimmed while it is off, still editable, and the tabs that hold it say so
+        ['src', 'pcm', 'dsd'].forEach(function (k) { UI.panes[k].classList.toggle('dimmed', !dspOn); });
+        [UI.srcOffNote, UI.pcmOffNote, UI.dsdOffNote].forEach(function (n) { n.textContent = dspOn ? '' : (L.dspOffTab || ''); });
+        Object.keys(UI.sliders).forEach(function (k) { UI.sliders[k].ctl.row.classList.toggle('dimmed', !dspOn); });
         renderSliders();
     }
 
     // the DSD settings as the engine takes them (LyrionDSPSettings buildConfig): unset or out of range, its default
     function dsdCutoff(c) { var v = num(c.DSDCutoff, NaN); return (v === 0 || (v > 20000 && v <= 60000)) ? v : 30000; }
     function dsdGain(c) { var v = num(c.DSDGain, NaN); return (v >= -24 && v <= 12) ? v : 0; }
+    // DSD out as the plugin takes it (Configuration::dsdOut: 1, on or true; dsdOutDSP: DXD unless 176400) and the engine
+    // (LyrionDSPSettings: the modulator standard, clans or adaptive, spaces and quotes trimmed as the engine trims them,
+    // else standard)
+    function dsdOut(c) { return /^(?:1|on|true)$/i.test(String(c.DSDOut)); }
+    function dsdOutMod(c) {
+        var v = String(c.DSDOutMod == null ? '' : c.DSDOutMod).replace(/^[ "]+|[ "]+$/g, '').toLowerCase();
+        return DSD_MODS.indexOf(v) >= 0 ? v : 'standard';
+    }
+    function dsdOutDsp(c) {
+        return /^[ "]*native[ "]*$/i.test(String(c.DSDOutDSP)) ? 'native' : String(c.DSDOutDSP) === '176400' ? 176400 : 352800;
+    }
+    // native's integrator as the engine takes the player's DSDIntegrator (lin unless int, min or nonring, trimmed, any case)
+    function dsdIntegrator(c) {
+        var v = String(c.DSDIntegrator == null ? '' : c.DSDIntegrator).replace(/^[ "]+|[ "]+$/g, '').toLowerCase();
+        return DSD_INTEGRATORS.indexOf(v) >= 0 ? v : 'lin';
+    }
+    function integratorName(i) {
+        return { lin: L.dsdIntLin || 'Linear', int: L.dsdIntInt || 'Intermediate', min: L.dsdIntMin || 'Minimum',
+                 nonring: L.filterNonRinging || 'Non-ringing' }[i] || i;
+    }
 
     function renderSliders() {
         if (!UI) { return; }
@@ -740,22 +969,24 @@
         var note = '';
         if (!STATUS) {
             note = '';
-        } else if (!p.speed_ok) {
-            note = L.noProc || '';
-        } else if (ahead) {
-            note = p.next.title ? fmt(L.nextTrack || 'Processing the next track: %s', p.next.title)
-                                : fmt(L.nextTrack || 'Processing the next track: %s', '').replace(/[\s:]+$/, '');
-        } else if (p.finished) {
-            note = L.finished || '';
-        } else if (!p.running) {
+        } else if (!p.running && !p.finished) {
+            // nothing said of a track fully sent or of the next one started (Simon 2026-11-05: "this is not something a
+            // user needs to see")
             note = mode === 'play' ? (L.notInPath || '') : '';
         }
         UI.statusNote.textContent = note;
+        renderClip();
 
         // figures: a running pipeline's, or a finished one's last (none when the page never saw it)
         var figures = !!(STATUS && (p.running || p.finished) && p.stages);
-        if (figures && p.speed !== undefined && p.speed !== null) {
-            UI.speed.textContent = fmt(L.realtime || '%sx realtime', speedText(p.speed));
+        // the engine's own speed (Status _engineSpeed), the one figure on every platform: how many times faster than real
+        // time it runs flat out, measured in the engine while it plays (0.1.72.46, its runs) or at its stream's start (its
+        // fill). Never a process's audio per CPU-second, which is no speed (ledger THE SPEED SHOWN IS ONE START'S FILL).
+        // The figure alone (Simon 2026-11-05: "remove all the text thats after the speed its not needed at all")
+        // (without its stages: a server with no /proc, the engine's report alone, Status _reportOnly)
+        var real = !!(STATUS && (p.running || p.finished)) && p.realtime !== undefined && p.realtime !== null;
+        if (real) {
+            UI.speed.textContent = fmt(L.realtime || '%sx realtime', speedText(p.realtime));
             UI.speed.className = 'speed-v';
         } else if (STATUS && p.running) {
             UI.speed.textContent = L.measuring || 'Measuring...';
@@ -764,10 +995,6 @@
             UI.speed.textContent = '-';
             UI.speed.className = 'speed-v none';
         }
-        var sub = [];
-        if (figures && p.slowest) { sub.push(fmt(L.slowest || 'slowest stage: %s', ROLE_NAMES[p.slowest] || p.slowest)); }
-        if (figures && p.cpu !== undefined && p.cpu !== null) { sub.push(fmt(L.cpu || 'CPU %s% of one core', p.cpu)); }
-        UI.speedSub.textContent = sub.join(' · ');
 
         var track = ahead ? p.next : now, src = [];
         if (track.type) { src.push(CODECS[track.type] || String(track.type).toUpperCase()); }
@@ -777,12 +1004,17 @@
 
         if (figures) {
             var r = p.resampler;
-            if (r && r.tool === 'decoder') {
+            if (r && r.tool === 'engine') {
+                // the converter to DSD (0.1.72.33): the engine took the track up itself, by the filter for its rate
+                row('up', filterName(r.filter) + ' → ' + rate(r.target) + ' (' + (L.engineUp || 'the engine') + ')');
+            } else if (r && r.tool === 'decoder') {
                 // our engine's own DSD decode (0.3.13): its low-pass and gain, as the engine takes them (Status _dsdSettings)
                 var dd = [L.dsdDecoder || 'Our decoder',
                           r.cutoff ? fmt(L.dsdLowpass || '%s low-pass', rate(r.cutoff)) : (L.dsdNoLowpass || 'no low-pass')];
                 if (r.gain) { dd.push((r.gain > 0 ? '+' : '') + r.gain + ' dB'); }
-                row('up', fmt(L.dsdUp || 'DSD: %s', dd.join(' · ') + ' → ' + rate(r.target)));
+                // native (the native round): its integrator, and the DSD rate it stays at
+                if (r.native) { dd.splice(1, 0, L.dsdNative || 'Native', integratorName(r.integrator)); }
+                row('up', fmt(L.dsdUp || 'DSD: %s', dd.join(' · ') + ' → ' + (r.native && DSD_RATE_NAMES[r.target] || rate(r.target))));
             } else if (r) {
                 var u = [PHASE_NAMES[r.phase] || r.phase];
                 if (r.precision) { u.push(r.precision + '-bit'); }
@@ -798,18 +1030,68 @@
                 row('up', L.off || 'Off');
             }
             var d = p.dsp || {};
-            row('dsp', [rate(d.rate), d.float ? '32-bit ' + (L.float || 'float') : (d.bitsin ? d.bitsin + '-bit' : '')]
-                .filter(Boolean).join(' · '));
+            // what the DSP works in: the engine decodes to 64-bit float and stays there on every route (its decoder,
+            // upsampler, filters and encoder); what it READS (d.bitsin: the source's bits, or soxr's 32-bit float) is
+            // not its precision, and the Source and SRC rows already name that
+            row('dsp', [(r && r.native && DSD_RATE_NAMES[d.rate]) || rate(d.rate), '64-bit ' + (L.float || 'float')].filter(Boolean).join(' · '));
             var o = p.output || {};
-            // a reduced stream's encoder states a bitrate or a quality, not a depth
-            var oq = o.kbps ? o.kbps + ' kbps' : (o.quality !== undefined && o.quality !== null ? 'q' + o.quality : (o.bits || 24) + '-bit');
-            row('out', o.format ? [o.format + ' ' + oq, rate(o.rate)].filter(Boolean).join(' · ') : '');
-            row('stages', (p.stages || []).map(function (s) {
-                return (ROLE_NAMES[s.role] || s.role) + ' ' + (s.speed !== undefined && s.speed !== null ? speedText(s.speed) + 'x' : '-');
-            }).join(' · '));
+            if (o.format === 'DSF') {
+                // native DSD out: the engine writes the DSF, at the DSD rate and with the modulator it took (Status _dsdOut)
+                var mods = { standard: L.dsdOutStandard || 'Standard', clans: 'CLANS', adaptive: L.dsdOutAdaptive || 'Adaptive' };
+                row('out', ['DSF', DSD_RATE_NAMES[o.dsd] || rate(o.dsd), o.mod ? fmt(L.dsdOutModulator || '%s modulator', mods[o.mod] || o.mod) : '']
+                    .filter(Boolean).join(' · '));
+            } else {
+                // a reduced stream's encoder states a bitrate or a quality, not a depth
+                var oq = o.kbps ? o.kbps + ' kbps' : (o.quality !== undefined && o.quality !== null ? 'q' + o.quality : (o.bits || 24) + '-bit');
+                row('out', o.format ? [o.format + ' ' + oq, rate(o.rate)].filter(Boolean).join(' · ') : '');
+            }
+            // each stage's cost: its share of the server's whole CPU, every core, at real time (Simon 2026-11-05: "it needs
+            // to be overall cpu performance"); none without the audio or a count of the cores (no /proc: macOS, Windows).
+            // Never an 'x' per CPU-second, which would read as a second, slower speed
+            var cores = num(p.cores, 0), share = num(p.audio, 0) > 0 && cores > 0;
+            var stages = share ? (p.stages || []).map(function (s) {
+                return (ROLE_NAMES[s.role] || s.role) + ' ' + (100 * num(s.cpu, 0) / num(p.audio, 1) / cores).toFixed(1) + '%';
+            }).join(' · ') : '';
+            row('stages', stages ? stages + ' ' + (L.totalCpu || 'of total CPU at real time') : '');
         } else {
             ['up', 'dsp', 'out', 'stages'].forEach(function (n) { row(n, ''); });
         }
+    }
+
+    // The clipping row (Simon 2026-11-03: "also want the clipping indicator in signal path"): the last finished track's
+    // output peak, and a dot for each of the last tracks (oldest first), coloured as the classic page colours its peak
+    // bars (sqdsp_core.js LocalDisplayLogSummary): with ReplayGain on, under -12 too low, under -8 a bit low, under -3
+    // fine, under 0 high, else clipped; with it off, under -5 too low, under -1 fine, up to +0.1 high, above clipped
+    function peakClass(v, rg) {
+        if (rg) { return v < -12 ? 'low' : v < -8 ? 'bitlow' : v < -3 ? 'ok' : v < 0 ? 'high' : 'clip'; }
+        return v < -5 ? 'low' : v < -1 ? 'ok' : v <= 0.1 ? 'high' : 'clip';
+    }
+    // a track's colour: PCM's is peakClass's; a DSD track over its 0 dB is high, not clipped (the engine takes a PCM
+    // source 2 dB past it), and clipped only where the engine held samples at its limit (0.1.72.46, Simon 2026-11-06)
+    function trackClass(p, rg) {
+        var cls = peakClass(p.v, rg);
+        if (!p.dsd) { return cls; }
+        return p.held > 0 ? 'clip' : cls === 'clip' ? 'high' : cls;
+    }
+    function renderClip() {
+        var r = UI.rows.clip;
+        r.v.textContent = '';
+        r.row.classList.toggle('hide', !PEAKS.length);
+        if (!PEAKS.length) { return; }
+        var c = client() || {};
+        var rg = /^(1|on|true)$/i.test(String((c.ReplayGain || {}).enabled));
+        var last = PEAKS[PEAKS.length - 1], cls = trackClass(last, rg);
+        var box = r.v.appendChild(make('span', 'clip'));
+        box.appendChild(make('span', 'pk ' + cls));
+        var db = (last.v > 0 ? '+' : '') + last.v.toFixed(1) + ' dBFS';
+        box.appendChild(make('span', null, fmt(cls === 'clip' ? (L.clipYes || 'Clipped: last track\'s peak %s')
+                                                              : (L.clipNone || 'None: last track\'s peak %s'), db)));
+        var hist = box.appendChild(make('span', 'pkhist'));
+        hist.title = L.clipHistory || '';
+        PEAKS.forEach(function (p) {
+            var d = hist.appendChild(make('span', 'pk ' + trackClass(p, rg)));
+            d.title = (p.v > 0 ? '+' : '') + p.v.toFixed(1) + ' dBFS';
+        });
     }
 
     // ---------------------------------------------------------------- presets

@@ -15,8 +15,10 @@ import (
 	"math/bits"
 
 	"sync"
+	"time"
 	"unsafe"
 
+	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
 	"github.com/google/uuid"
 )
 
@@ -42,6 +44,10 @@ type WavReader struct {
 	RawPeak          float64
 	IgnoreDataLength bool
 	Length           uint32
+
+	// Meter (SqueezeDSP fork): the conversion's own time, for the engine's speed (foxSpeed); the reads, which wait
+	// for whatever feeds the engine, and the sends, which wait for the next stage, are left out
+	Meter *foxSpeed.Meter
 }
 
 // Holds detailed information about the wav Header
@@ -428,10 +434,12 @@ func (FD *WavReader) DecodeInput(DecodedSamplesChannel chan [][]float64) error {
 			remainingBytes := filledBytes - processableBytes
 
 			if processableBytes > 0 {
+				t0 := time.Now()
 				samples, err := FD.ConvertBytesToFloat64(processingBuffer[:processableBytes])
 				if err != nil {
 					return fmt.Errorf("%s: conversion error: %w", functionName, err)
 				}
+				FD.Meter.Add(len(samples[0]), time.Since(t0))
 				DecodedSamplesChannel <- samples
 				TotalBytes += int64(processableBytes)
 				TotalFrames += int64(len(samples[0]))

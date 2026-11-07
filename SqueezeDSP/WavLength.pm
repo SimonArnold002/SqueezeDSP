@@ -5,7 +5,8 @@ package Plugins::SqueezeDSP::WavLength;
 # down to the player's max (the D rule). Into a pipe neither can go back to fill its sizes in, so a
 # renderer that takes a track's length from the header - the Platin Hub - showed nonsense.
 #
-# The length is LMS's for the track less the seek point, PLUS A SECOND. Squeezelite stops at a stated
+# The length is LMS's for the track less the seek point (a seek through the rule; after a byte seek the
+# whole length: seconds below), PLUS A SECOND. Squeezelite stops at a stated
 # size or at the end of the stream, whichever comes first (pcm.c:207), so a size a little long ends
 # where the stream does, while a short one would cut the track - and LMS's durations are rounded. With
 # no length known (a radio stream) the header says "unknown", as before.
@@ -26,6 +27,10 @@ use Config;
 use File::Spec;
 
 use constant MARGIN => 1;
+# A DSF states its length before its data and has no "unknown" (foxDSDEncoder refuses to write one), so a stream LMS
+# knows no length for (a radio station) is stated as a day: an upper bound like the rest, which the stream never
+# reaches; the engine ends the stream with its input (foxDSDEncoder Bounded).
+use constant DSF_UNKNOWN => 86400;
 
 # The filter, run as `perl -e '<this>' <seconds>`. It contains no single quote (it goes inside
 # single quotes), no [ ] (LMS's binary brackets) and no $NAME$ pair (LMS's tokens), although it is
@@ -61,10 +66,15 @@ sub perl {
     return ( defined $p && $p =~ m{perl[^/\\]*$}i && -x $p ) ? $p : undef;
 }
 
-# The seconds to state: the track's length less where this stream starts (a seek, a resume, a
-# DSP change's re-open), plus MARGIN; 0 when LMS does not know the length. The song being opened
-# is already the player's streaming song when LMS builds its command (StreamingController.pm:1218
-# puts it on the queue before Song::open), and Song::open has set $transcoder->{start} (Song.pm:433).
+# The seconds to state: the track's length less where this stream starts, plus MARGIN; 0 when LMS
+# does not know the length. The song being opened is already the player's streaming song when LMS
+# builds its command (StreamingController.pm:1218 puts it on the queue before Song::open). Where this
+# stream starts is $transcoder->{start}, which Song::open sets only for a seek through the rule (T,
+# canSeek 2: Song.pm:401-432). A byte seek (canSeek 1: a remote FLAC such as Qobuz, a local file fed on
+# stdin; a seek, a resume, a DSP change's re-open) has none, so the whole length is stated: too long,
+# which ends where the stream does. Not the seek's time instead: a byte seek lands where its bytes
+# fall, not exactly at that time, and a length too short would cut the track (ledger A BYTE SEEK
+# STATES THE WHOLE LENGTH).
 sub seconds {
     my $t      = shift || {};
     my $client = Slim::Player::Client::getClient( $t->{clientid} ) or return 0;
@@ -77,10 +87,11 @@ sub seconds {
 }
 
 # One of our WAV rules: LMS chose wav as the stream format (getConvertCommand2 takes it from the
-# rule's key), and the rule as LMS keeps it, before tokenising, runs our engine.
+# rule's key), and the rule as LMS keeps it, before tokenising, runs our engine. Or one of our DSF rules
+# (dsf, TemplateConfig template_DSF and template_DSFUP): apply sorts out which of those need a length.
 sub ours {
     my $t = shift;
-    return 0 unless ref $t eq 'HASH' && ( $t->{streamformat} // '' ) eq 'wav';
+    return 0 unless ref $t eq 'HASH' && ( $t->{streamformat} // '' ) =~ /^(?:wav|dsf)$/;
     my $tag = '[' . ( $Plugins::SqueezeDSP::Plugin::convolver || 'SqueezeDSP' ) . ']';
     return index( $t->{command} // '', $tag ) >= 0 ? 1 : 0;
 }
@@ -94,6 +105,12 @@ sub apply {
     return $command unless defined $command && ours($t);
     my $secs = eval { seconds($t) } || 0;
     my ( $body, $tail ) = $command =~ /^(.*?)(\s*&?\s*\|?\s*)$/s;
+    if ( $t->{streamformat} eq 'dsf' ) {
+        # the engine writes the DSF and ends the rule; it states its length itself when it reads a DSF file
+        # (--formatin=DSD --input), and is told it when it reads a pipe (the converter to DSD: a PCM source, a DFF)
+        return $command unless $body =~ /--formatout=DSF --dsdrate=\S+ --dsdmax=\d+$/ && $body !~ /--formatin=DSD --input /;
+        return sprintf( '%s --wavlength=%.3f%s', $body, $secs > 0 ? $secs : DSF_UNKNOWN, $tail );
+    }
     if ( $body =~ /--formatout=WAV$/ ) {
         return $command unless $secs > 0;
         return sprintf( '%s --wavlength=%.3f%s', $body, $secs, $tail );

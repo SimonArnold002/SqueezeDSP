@@ -1,5 +1,7 @@
 package Plugins::SqueezeDSP::Binary;
 use strict;
+# (SqueezeDSP fork, 0.1.72.46) the engine's path as setup_binary finds it (Page.pm's /squeezedsp/bench runs it)
+our $ENGINE;
 use File::Copy;
 use File::Spec::Functions qw(:ALL);
 use Slim::Utils::Network;
@@ -61,6 +63,7 @@ sub setup_binary {
     my $binpath = catdir(Slim::Utils::PluginManager->allPlugins->{$Plugins::SqueezeDSP::Plugin::thisapp}->{'basedir'}, 'Bin', "/", $Plugins::SqueezeDSP::Plugin::convolver . $binExtension);
     my $binversion_path = catdir(Slim::Utils::PluginManager->allPlugins->{$Plugins::SqueezeDSP::Plugin::thisapp}->{'basedir'}, 'Bin', "/", $Plugins::SqueezeDSP::Plugin::binversion);
     Plugins::SqueezeDSP::Utils::debug('standard binary path: ' . $binpath);
+    $ENGINE = $binpath;
     if (-e $binversion_path) {
         Plugins::SqueezeDSP::Utils::debug('copying binary' . $exec);
         copy($exec, $binpath) or die "copy failed: $!";

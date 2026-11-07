@@ -13,6 +13,92 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.48	Fork: native DSD carries the PEQ: at a DSD rate the engine had dropped every PEQ filter (and with
+				loudness on it stopped); the PEQ and loudness are now designed at the DSD rate, as the DXD route
+				does at its own. Nothing else changes.
+	0.1.72.47	Fork: native DSD processing, an opt-in: with the DSD out DSP rate Native, a DSF's DSP runs at
+				its own DSD rate through the integrator picked on the DSD tab (Linear, Intermediate, Minimum or
+				Non-ringing), at the DSD low-pass's band, and goes out at that rate or up to the converter's; a
+				DSD rate out under the file's plays that track at DXD. DXD stays the default, unchanged.
+	0.1.72.46	Fork: the processing speed is measured while a track plays, not only at its start, so a heavier
+				track or a busier server shows within seconds: the engine's own figure, on every platform (its
+				engine ours on all six now, not only Linux x64; on Windows still taken at a track's start). The
+				signal meter reads DSD out against DSD's 0 dB, red only where the engine held samples back;
+				/squeezedsp/bench times the engine's loops on the server; the AVX2 loops leaner.
+	0.1.72.45	Fork: the engine's upsampling filter and FIR loops run in AVX2 on an x86-64 CPU that has it
+				(the Linux engine), four outputs or two bins at a time, with the same output to the bit; the
+				engine's log names which loops ran.
+	0.1.72.44	Fork: the filter family: the upsampling filters are picked from one dropdown each, by name,
+				length and phase: Kaiser (short, long, extra-long; as before), Gaussian (short, medium, long),
+				Half-band, Slow roll-off and Non-ringing (these three leaky by design, for listening).
+	0.1.72.43	Fork: the pages say less: the speed shows its figure alone; nothing about a track loading or
+				fully sent; no notes explaining the converter, its filters or the outputs, or restating a
+				choice. The engine's log names why a DSD decode starts afresh after a seek.
+	0.1.72.42	Fork: a DSD track begun at a seek (or a cue sheet's track) no longer hands its decode on: the
+				next file went on from it with its frames out by the seek's length and stopped that much
+				short (a track cut, the player moving on). Only a whole file both ends carries its decode.
+	0.1.72.41	Fork: gapless joins carry on real tracks: the engine lowercased its whole --trackURL=
+				argument, so no URL with a capital (a folder name, a Qobuz stream's signature, a non-ASCII
+				escape) matched the plugin's note, and each join lost the last track's tails. The URL is
+				kept as LMS gives it.
+	0.1.72.40	Fork: the engine's log over HTTP, read-only, at /squeezedsp/log (a player's lines, the last few,
+				those holding a text; the player's gapless note first); the engine logs each gapless decision
+				at Info, so the log shows them without debug.
+	0.1.72.39	Fork: gapless joins are one continuous stream through every stage: the upsampler, the DSD
+				decoder, the FIR, the DSD encoder and its modulator carry their state into the next track,
+				and the last track before the queue's end plays every filter's tail out. The plugin tells
+				the engine, per player, when a stream continues the last and whether a track follows
+				(Gapless.pm); a seek, skip or restart never takes the last track's state.
+	0.1.72.38	Fork: the live page gives each stage's CPU as a share of the whole CPU, every core, at real
+				time (Stages), in place of one core's share; the speed line no longer repeats the CPU total.
+				The DSP switch heads the live page, on every tab; PCM's filters move to the Sample Rate
+				Converter, shown with its PCM options as DSD's are with its DSD ones (both pages).
+	0.1.72.37	Fork: PCM upsampling in our engine: with the Sample Rate Converter on PCM the engine takes every
+				track to its target itself, before the DSP, up or down, by PCM's own filters (one for 44.1/48 kHz
+				sources, one for hi-res; short or long; linear, intermediate or minimum phase), in place of
+				ffmpeg's soxr and SoX's rate; the PCM tab offers them in place of soxr's precision, passband
+				and steep. Every rate change puts the filter at the lower of the two Nyquists (going down, or up
+				by less than 2x, the engine left images or aliases at -7 to -15 dB at the top of the band). The
+				level's headroom is the whole filter's peak gain, not one partition's (up to 0.76 dB low, and
+				with FIR Strength under 100 at 176.4k and up about 5 dB high); the filter cache is built once
+				again (config 0.3.20).
+	0.1.72.36	Fork: the FIR stage: the FFT's tables reach the sizes the convolver uses at 176.4k and up (the
+				same bits, no allocation per block); a long FIR at 176.4k and up runs in larger partitions,
+				the level kept (up to 2x less CPU for the FIR at 705.6k); a gapless track goes on from the last
+				one's filter state exactly (the first second after the join was wrong with a FIR).
+	0.1.72.35	Fork: the DSD encoder runs each channel's interpolation ahead of the paired loop (the same bits,
+				1.4-1.6x faster at DSD512), hold scans only what can pass the limit, bits pack a byte at a time;
+				bounds checks out of the FIR's, the upsampler's and the DSD decoder's loops (the same bits); the
+				SqueezeDSP page's speed is the engine's own, how fast it ran flat out while the player's buffer
+				filled (a gapless track shows the last fill, named), with its busiest stage; the stages each
+				process's share of a core.
+	0.1.72.34	Fork: the SqueezeDSP page's signal path gives the DSP's own precision, 64-bit float, on every
+				route (it named the bits the engine reads: "705.6 kHz, 16-bit" for a 16-bit FLAC).
+	0.1.72.33	Fork: our own upsampler for the Sample Rate Converter to DSD: the engine takes a PCM track to 705.6k
+				itself, in two stages (a steep x2 filter, the player's choice of linear, intermediate or minimum
+				phase, short or long, one for 44.1/48 kHz sources and one for hi-res; then a gentle rational stage),
+				runs the DSP there and modulates; no ffmpeg or soxr before it. The modulator is order 7 at every DSD
+				rate, standard or CLANS, its design by the source: a PCM source's (held at 0.63), a DSD source's (at
+				0.72). The pages offer the two filters; the SqueezeDSP page's signal path names the one that ran
+				(config 0.3.19).
+	0.1.72.32	Fork: the Sample Rate Converter to DSD plays a PCM source at its PCM level: its full scale goes to
+				SACD's 0 dB (50% modulation), not full swing; a DSD source keeps its own modulation (config 0.3.18).
+	0.1.72.31	Fork: the SqueezeDSP page's CPU figure is the cost at real time (all stages' CPU per second of
+				audio), not CPU over wall time, which counted the buffer filling at a track's start.
+	0.1.72.30	Fork: the settings in tabs on both pages (Presets, DSP, SRC, PCM, DSD, PEQ, Convolution, Crossfeed). The
+				Sample Rate Converter: off, to PCM (Upsample, as before) or to DSD, every track at the DSD rate chosen
+				(DSD64-512) for a player that lists dsf; PCM's and DSD's output each on its own tab (DSD to PCM, or DSD
+				to DSD at the source's rate); the Clipping row in the SqueezeDSP page's signal path.
+	0.1.72.29	Fork: DSD out on both pages, for a player that lists dsf: on or off, its rate (the source's or a fixed
+				one), max rate, modulator and DSP rate; Reset keeps them. The SqueezeDSP page's signal path names DSF out,
+				its DSD rate and modulator, with the engine's speed.
+	0.1.72.28	Fork: DSD out's DSP rate is a per-player choice: DXD (352.8k, the default) or 176.4k for a server short
+				of CPU (DSDOutDSP 176400).
+	0.1.72.27	Fork: DSD out runs the DSP at DXD (352.8k) at every DSD rate, as the plan says (was 176.4k). Config 0.3.16.
+	0.1.72.26	Fork: native DSD out, a test build with no page controls yet. A player that lists dsf, with DSDOut on in
+				its settings, plays a DSF through the DSP and back to DSD as a DSF stream, by our own modulator
+				(standard, CLANS or adaptive: DSDOutMod) at the source's rate or a fixed one (DSDOutRate), up to
+				DSDOutMax. Config 0.3.15.
 	0.1.72.25	Fork: Upsample's passband defaults to 99% per family, and to 95% with Player max, which takes no
 				higher (a higher choice plays at 95%); Auto stays a choice. The classic page shows a stored Auto and a
 				DSD low-pass of None as they are.
@@ -197,7 +283,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.25";
+my $revision = "0.1.72.48";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
@@ -233,6 +319,7 @@ use Plugins::SqueezeDSP::Utils;
 use Plugins::SqueezeDSP::Binary;
 use Plugins::SqueezeDSP::Upsample;
 use Plugins::SqueezeDSP::WavLength;
+use Plugins::SqueezeDSP::Gapless;
 use Plugins::SqueezeDSP::Status;
 use Plugins::SqueezeDSP::Page;
 
@@ -276,16 +363,20 @@ sub initPlugin {
 
     # Upsample picks each track's target at stream start through a wrap of LMS's command
     # builder (Upsample.pm), so it goes in before any player's rules are written. Without it,
-    # or without an ffmpeg that has soxr, no player gets upsample rules.
+    # no player gets upsample rules. The engine resamples (0.1.72.37), so ffmpeg and its soxr
+    # matter only to the DSD ffmpeg decodes (a DFF).
     if ( Plugins::SqueezeDSP::Upsample::install() ) {
         my $ff = Plugins::SqueezeDSP::Upsample::ffmpegPath();
-        my $msg = $ff ? ( Plugins::SqueezeDSP::Upsample::soxr() ? "ffmpeg $ff has soxr: upsampling available"
-                                                               : "ffmpeg $ff has no soxr: upsampling unavailable" )
-                      : "no ffmpeg found: upsampling unavailable";
-        Plugins::SqueezeDSP::Utils::debug($msg);
+        my $msg = $ff ? ( Plugins::SqueezeDSP::Upsample::soxr() ? "ffmpeg $ff has soxr: a DFF reaches its rate through it"
+                                                               : "ffmpeg $ff has no soxr: a DFF reaches its rate through ffmpeg's own resampler" )
+                      : "no ffmpeg found: a DFF is decoded by DSDPlayer's dsdplay or LMS's sox";
+        Plugins::SqueezeDSP::Utils::debug("upsampling available (the engine resamples); $msg");
         my $perl = Plugins::SqueezeDSP::WavLength::perl();
         Plugins::SqueezeDSP::Utils::debug( "PCM mode states each track's length in its WAV header (the engine's --wavlength; "
             . ( $perl ? "a filter on $perl after a resample to the player's max)" : "after a resample to the player's max it says unknown: no perl beside LMS)" ) );
+        # the engine's gapless note per player, written at each of our streams' start (the wrap) and kept up with the
+        # playlist (Gapless.pm)
+        Plugins::SqueezeDSP::Gapless::install();
     } else {
         $log->warn("LMS has no tokenizeConvertCommand2 to wrap: upsampling unavailable");
     }
@@ -360,6 +451,7 @@ sub postinitPlugin {
 }
 
 sub shutdown {
+    Plugins::SqueezeDSP::Gapless::uninstall();
     Slim::Control::Request::unsubscribe(\&clientEvent);
 	#gain logging
 	Slim::Control::Request::unsubscribe(\&_trackChanged);  # add this
@@ -404,8 +496,10 @@ sub webPages {
     if (Slim::Utils::PluginManager->isEnabled("Plugins::SqueezeDSP::Plugin")) {
         Slim::Web::Pages->addPageFunction("plugins/SqueezeDSP/index.html", \&handleWebIndex);
         Slim::Web::Pages->addPageLinks("plugins", { $class->getDisplayName => 'plugins/SqueezeDSP/index.html' });
-        # the SqueezeDSP page, a raw handler at /squeezedsp (Page.pm); its version handed in here
-        Plugins::SqueezeDSP::Page->init($revision);
+        # the SqueezeDSP page, a raw handler at /squeezedsp (Page.pm); its version handed in here, and the engine's log
+        # path as a reference (/squeezedsp/log reads it at each request: set in initPlugin), and the temp folder's
+        # (/squeezedsp/bench writes there, 0.1.72.46)
+        Plugins::SqueezeDSP::Page->init( $revision, \$logfile, \$pluginTempDataDir );
     } else {
         Slim::Web::Pages->addPageLinks("plugins", { $class->getDisplayName => undef });
         Slim::Web::Pages->addPageLinks("icons", { $class->getDisplayName => undef });

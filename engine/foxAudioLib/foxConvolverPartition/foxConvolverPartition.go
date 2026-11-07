@@ -8,8 +8,10 @@ import (
 	"math/bits"
 	"math/cmplx"
 	"strconv"
+	"time"
 
 	fft "github.com/Foxenfurter/foxAudioLib/foxFFT"
+	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
 	"github.com/Foxenfurter/foxAudioLib/foxUtils"
 )
 
@@ -48,6 +50,11 @@ type PartitionedConvolver struct {
 	Buffer       []float64
 	outputBuffer []float64
 
+	// (SqueezeDSP fork) the gapless hand-over (EncodeState / DecodeState): the input a track ended with short of a
+	// whole partition, which the next track starts from, and how many outputs it then drops, sent by the last track
+	pending []float64
+	skip    int
+
 	// Pre-allocated working buffers
 	workResult  []complex128 // length PartitionedHalfFFTSize
 	workRealBuf []float64    // length PartitionedFFTSize — real input + IFFT output
@@ -60,6 +67,10 @@ type PartitionedConvolver struct {
 	DebugOn     bool
 	DebugFunc   func(string)
 	WarningFunc func(string)
+
+	// Meter (SqueezeDSP fork): ConvolveChannel's own work, for the engine's speed (foxSpeed); its waits for the
+	// stages either side left out. Not in the filter cache (GobEncode names its fields).
+	Meter *foxSpeed.Meter
 }
 
 // ─── Size configuration ───────────────────────────────────────────────────────
@@ -91,10 +102,33 @@ func SetPartitionSizes(ChunkSize int) {
 
 // ─── Constructor ──────────────────────────────────────────────────────────────
 
+// (SqueezeDSP fork) partitionSize is the partition for an impulse of taps at sampleRate. Fox's sizes
+// (foxUtils.CalculateChunkSize) stay below 176.4k, outside streaming and for short impulses. At 176.4k and up a long
+// impulse gets partitions doubled from his 8192 until it needs at most partitionsWanted of them, up to maxPartition:
+// each output sample costs a complex multiply-add per partition, and a 1 s FIR at 705.6k needed 87, most of the
+// convolver's time (BenchmarkPartition). The same convolution to rounding, about -300 dB
+// (TestPartitionSizesSameConvolution). MaxGain is the whole filter's (peakGain), whatever the partitions.
+// All channels' impulses have one length (CleanUpImpulse cuts them alike), so every channel gets the same size: the
+// sizes are package-wide.
+const (
+	partitionsWanted = 16
+	maxPartition     = 65536
+)
+
+func partitionSize(sampleRate, taps int, mode foxUtils.ProcessingMode) int {
+	L := foxUtils.CalculateChunkSize(sampleRate, mode)
+	if mode != foxUtils.ModeStreaming || sampleRate < 176400 {
+		return L
+	}
+	for L < maxPartition && (taps+L-1)/L > partitionsWanted {
+		L <<= 1
+	}
+	return L
+}
+
 func NewPartitionedConvolver(impulse []float64, sampleRate int) *PartitionedConvolver {
 	if sampleRate > 0 {
-		chunkSize := foxUtils.CalculateChunkSize(sampleRate, ProcessingMode)
-		SetPartitionSizes(chunkSize) // uncomment to auto-size
+		SetPartitionSizes(partitionSize(sampleRate, len(impulse), ProcessingMode))
 	}
 
 	pc := &PartitionedConvolver{
@@ -190,7 +224,7 @@ func (pc *PartitionedConvolver) initializePartitions() {
 		pc.previousChunkTail = make([]float64, PartitionedOverlapSize)
 	}
 
-	pc.MaxGain = pc.maxGainFromPartitions()
+	pc.MaxGain = peakGain(pc.FilterImpulse) // (SqueezeDSP fork) the whole filter's; Fox's was one partition's (maxGainFromPartitions)
 	if pc.sampleRate > 0 {
 		pc.RMSGain = RMSGainInBand(pc.FilterImpulse, pc.sampleRate, 20, 20000)
 	} else {
@@ -236,13 +270,9 @@ func (pc *PartitionedConvolver) processChunk(chunk []float64, updateTail bool) [
 	// ── Build real input buffer ───────────────────────────────────────────
 	// Write directly into workRealBuf as float64 — no complex conversion.
 	realBuf := pc.workRealBuf
-	for i := 0; i < overlapSize; i++ {
-		realBuf[i] = pc.previousChunkTail[i]
-	}
-	for i := 0; i < L; i++ {
-		realBuf[overlapSize+i] = chunk[i]
-	}
-	realBuf[N-1] = 0 // only element neither loop above touches
+	copy(realBuf[:overlapSize], pc.previousChunkTail[:overlapSize])
+	copy(realBuf[overlapSize:overlapSize+L], chunk[:L])
+	realBuf[N-1] = 0 // only element neither copy above touches
 
 	// ── Forward real FFT → N/2+1 unique bins ─────────────────────────────
 	// Previously: filled []complex128 with complex(sample,0), ran N-point FFT.
@@ -270,22 +300,12 @@ func (pc *PartitionedConvolver) processChunk(chunk []float64, updateTail bool) [
 		}
 	}
 
+	// (SqueezeDSP fork) the same sums in the same order, a partition at a time (multiplyAdd), the result's slice not
+	// reloaded from pc at every bin (TestChunkBitsUnchanged).
+	res := pc.workResult[:halfN]
 	for p := 0; p < maxPartitions; p++ {
 		audioIdx := (pc.ringPosition - p + pc.ringSize) % pc.ringSize
-		audioFFT := pc.audioFFTRing[audioIdx]
-		impulseFFT := pc.impulsePartitions[p]
-
-		i := 0
-		for i < halfN-3 {
-			pc.workResult[i] += audioFFT[i] * impulseFFT[i]
-			pc.workResult[i+1] += audioFFT[i+1] * impulseFFT[i+1]
-			pc.workResult[i+2] += audioFFT[i+2] * impulseFFT[i+2]
-			pc.workResult[i+3] += audioFFT[i+3] * impulseFFT[i+3]
-			i += 4
-		}
-		for ; i < halfN; i++ {
-			pc.workResult[i] += audioFFT[i] * impulseFFT[i]
-		}
+		multiplyAdd(res, pc.audioFFTRing[audioIdx], pc.impulsePartitions[p])
 	}
 
 	// ── Inverse real FFT → float64 output ────────────────────────────────
@@ -294,9 +314,7 @@ func (pc *PartitionedConvolver) processChunk(chunk []float64, updateTail bool) [
 	fft.RealIfftUnchecked(pc.workResult, realBuf)
 
 	output := pc.workOutput
-	for i := 0; i < L; i++ {
-		output[i] = realBuf[overlapSize+i] // no real() conversion needed
-	}
+	copy(output[:L], realBuf[overlapSize:overlapSize+L]) // no real() conversion needed
 
 	// Advance ring
 	pc.ringPosition = (pc.ringPosition + 1) % pc.ringSize
@@ -305,6 +323,37 @@ func (pc *PartitionedConvolver) processChunk(chunk []float64, updateTail bool) [
 	}
 
 	return output
+}
+
+// (SqueezeDSP fork) multiplyAdd: res[i] += audioFFT[i] * impulseFFT[i] over res: two bins a step in AVX2 where the
+// engine is built with it and the CPU has it (mac_avx2.go), else multiplyAddScalar; the same bits either way.
+func multiplyAdd(res, audioFFT, impulseFFT []complex128) {
+	if haveAVX2 {
+		multiplyAddAVX2(res, audioFFT, impulseFFT)
+		return
+	}
+	multiplyAddScalar(res, audioFFT, impulseFFT)
+}
+
+// (SqueezeDSP fork) AVX2: whether multiplyAdd runs in AVX2 here; the engine logs it at a stream's start, as the bits
+// are the same either way.
+func AVX2() bool { return haveAVX2 }
+
+// multiplyAddScalar: four bins a step on local slices of one length, no bounds check per bin; the reference for
+// multiplyAddAVX2 (TestMultiplyAddAVX2Bits).
+func multiplyAddScalar(res, audioFFT, impulseFFT []complex128) {
+	audioFFT, impulseFFT = audioFFT[:len(res)], impulseFFT[:len(res)]
+	i := 0
+	for ; i+4 <= len(res); i += 4 {
+		r4, a4, h4 := res[i:i+4:i+4], audioFFT[i:i+4:i+4], impulseFFT[i:i+4:i+4]
+		r4[0] += a4[0] * h4[0]
+		r4[1] += a4[1] * h4[1]
+		r4[2] += a4[2] * h4[2]
+		r4[3] += a4[3] * h4[3]
+	}
+	for ; i < len(res); i++ {
+		res[i] += audioFFT[i] * impulseFFT[i]
+	}
 }
 
 // ─── Public convolution methods ───────────────────────────────────────────────
@@ -328,10 +377,12 @@ func (pc *PartitionedConvolver) ConvolveChannel(inputSignalChannel, outputSignal
 				pc.debug(packageName + ": " + functionName + ": Nothing to convolve with")
 				NoConvolverMessage = true
 			}
+			pc.Meter.Add(len(inputBlock), 0) // passed along: no work
 			outputSignalChannel <- inputBlock
 			continue
 		}
 
+		t0 := time.Now()
 		pc.Buffer = append(pc.Buffer, inputBlock...)
 
 		for len(pc.Buffer) >= PartitionedChunkSize {
@@ -340,6 +391,8 @@ func (pc *PartitionedConvolver) ConvolveChannel(inputSignalChannel, outputSignal
 			pc.outputBuffer = append(pc.outputBuffer, processedOutput...)
 			pc.Buffer = pc.Buffer[PartitionedChunkSize:]
 		}
+		pc.Meter.Add(len(inputBlock), time.Since(t0))
+		pc.dropSent()
 
 		for len(pc.outputBuffer) >= pc.outputLength {
 			outputSignalChannel <- pc.outputBuffer[:pc.outputLength]
@@ -354,6 +407,7 @@ func (pc *PartitionedConvolver) ConvolveChannel(inputSignalChannel, outputSignal
 
 	// End of track — flush remaining input with zero-padding
 	if len(pc.Buffer) > 0 {
+		t0 := time.Now()
 		remainingSamples := len(pc.Buffer)
 		if pc.DebugOn {
 			pc.debug(packageName + ": " + functionName +
@@ -361,10 +415,20 @@ func (pc *PartitionedConvolver) ConvolveChannel(inputSignalChannel, outputSignal
 		}
 		paddedChunk := make([]float64, PartitionedChunkSize)
 		copy(paddedChunk, pc.Buffer)
+		// (SqueezeDSP fork) The padded partition gives this track's last outputs; the next track goes on from the last
+		// whole one: the ring put back, this input kept for it (pending, EncodeState) and these outputs dropped there.
+		// Fox's hand-over went on from the padding, with the tail of the partition before: the next track's first
+		// outputs, as many as the filter's delay, replayed and then skipped what this track ended with, up to a
+		// partition (TestGaplessJoin).
+		pos, filled := pc.ringPosition, pc.ringFilled
 		finalOutput := pc.processChunk(paddedChunk, false)
+		pc.ringPosition, pc.ringFilled = pos, filled
+		pc.pending = append(pc.pending[:0], pc.Buffer...)
 		pc.outputBuffer = append(pc.outputBuffer, finalOutput[:remainingSamples]...)
 		pc.Buffer = make([]float64, 0)
+		pc.Meter.Add(0, time.Since(t0))
 	}
+	pc.dropSent()
 
 	if len(pc.outputBuffer) > 0 {
 		outputSignalChannel <- pc.outputBuffer
@@ -377,6 +441,14 @@ func (pc *PartitionedConvolver) ConvolveChannel(inputSignalChannel, outputSignal
 
 	if pc.DebugOn {
 		pc.debug(packageName + ": " + functionName + ": Track completed. State preserved for gapless continuation.")
+	}
+}
+
+// dropSent (SqueezeDSP fork) drops the outputs the last track sent already (skip, from DecodeState).
+func (pc *PartitionedConvolver) dropSent() {
+	if pc.skip > 0 {
+		n := min(pc.skip, len(pc.outputBuffer))
+		pc.outputBuffer, pc.skip = pc.outputBuffer[n:], pc.skip-n
 	}
 }
 
@@ -520,6 +592,48 @@ func (pc *PartitionedConvolver) rmsGainFromFFTPartitions() float64 {
 	return math.Sqrt(sumSq / float64(count))
 }
 
+// peakGain (SqueezeDSP fork) is the filter's peak gain, its largest |H(f)| over the whole band, which MaxGain is (the
+// level's headroom: PrepareChannelGains). The impulse's real FFT, zero-padded to at least four times its length, so the
+// narrowest peak the filter can have is never more than 0.22 dB under its nearest bin; then every local maximum within
+// 0.3 dB of the largest bin refined by the parabola through it and its neighbours on a dB scale, the largest of those
+// taken (never below a bin). Within 0.01 dB of a grid 16 points a tap fine, a narrow resonance halfway between two
+// bins included (TestMaxGainBetweenBins: its bin 0.08 dB low). 0 for an empty impulse. Fox's MaxGain was the largest
+// bin of any one partition's FFT (maxGainFromPartitions, kept below, no longer read): it changed with the partition
+// size, read Simon's impulse up to 9% high (the level up to 0.76 dB low), and with FIR Strength under 100 at 176.4k
+// and up about half the true peak, the output then up to about 5 dB over (ledger PER-PARTITION PEAK READS THE FILTER
+// WRONG; Simon 2026-11-05: "okay we look to fix that in next round along with PCM upsampling work").
+func peakGain(h []float64) float64 {
+	if len(h) == 0 {
+		return 0
+	}
+	n := NextPowerOf2(max(4*len(h), 1<<16))
+	in := make([]float64, n)
+	out := make([]complex128, n/2+1)
+	copy(in, h)
+	if err := fft.RealFft(in, out); err != nil {
+		return 0
+	}
+	mag := make([]float64, len(out))
+	top := 0.0
+	for i, v := range out {
+		mag[i] = cmplx.Abs(v)
+		top = math.Max(top, mag[i])
+	}
+	peak := top
+	near := top * math.Pow(10, -0.3/20)
+	for k := 1; k < len(mag)-1; k++ {
+		b := mag[k]
+		if b < near || b < mag[k-1] || b < mag[k+1] || mag[k-1] <= 0 || mag[k+1] <= 0 {
+			continue
+		}
+		a, c, y := math.Log(mag[k-1]), math.Log(mag[k+1]), math.Log(b)
+		if d := a - 2*y + c; d < 0 {
+			peak = math.Max(peak, math.Exp(y-0.125*(a-c)*(a-c)/d))
+		}
+	}
+	return peak
+}
+
 func (pc *PartitionedConvolver) maxGainFromPartitions() float64 {
 	maxGain := 0.0
 	for _, partition := range pc.impulsePartitions {
@@ -543,11 +657,19 @@ func (pc *PartitionedConvolver) maxGainFromPartitions() float64 {
 // that restores PartitionedHalfFFTSize before allocating ring buffers will
 // produce correctly-sized slots.
 
+// filterCacheVersion (SqueezeDSP fork) leads each convolver in the filter cache (filter_<client>_<rate>.gob), so a cache
+// an earlier engine wrote fails to decode and the filter is built again (LoadConvolvers' error), as after a change of
+// settings: the cache is otherwise taken whenever it is newer than the settings, and it holds MaxGain. -2: MaxGain is the
+// whole filter's peak (peakGain), 0.1.72.37. Negative, so a cache from before it, which leads with PartitionedChunkSize,
+// never reads as one.
+const filterCacheVersion = -2
+
 func (pc *PartitionedConvolver) GobEncode() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 
 	for _, v := range []any{
+		filterCacheVersion,
 		PartitionedChunkSize,
 		PartitionedFFTSize,
 		PartitionedHalfFFTSize, // NEW — must be encoded so decoder can size buffers
@@ -573,6 +695,13 @@ func (pc *PartitionedConvolver) GobDecode(data []byte) error {
 	buf := bytes.NewBuffer(data)
 	dec := gob.NewDecoder(buf)
 
+	var version int
+	if err := dec.Decode(&version); err != nil {
+		return err
+	}
+	if version != filterCacheVersion {
+		return fmt.Errorf("filter cache version %d, want %d: built again", version, filterCacheVersion)
+	}
 	var chunkSize, fftSize, halfFFTSize, impulseChunkSize, overlapSize int
 	for _, p := range []any{
 		&chunkSize, &fftSize, &halfFFTSize, &impulseChunkSize, &overlapSize,
@@ -605,6 +734,7 @@ func (pc *PartitionedConvolver) GobDecode(data []byte) error {
 	// Re-initialise transient buffers at the restored sizes.
 	pc.Buffer = make([]float64, 0)
 	pc.outputBuffer = make([]float64, 0)
+	pc.pending, pc.skip = nil, 0
 
 	pc.audioFFTRing = make([][]complex128, pc.ringSize)
 	for i := range pc.audioFFTRing {
@@ -633,6 +763,7 @@ func (pc *PartitionedConvolver) EncodeState() ([]byte, error) {
 		pc.ringPosition,
 		pc.ringFilled,
 		pc.previousChunkTail,
+		append([]float64{}, pc.pending...), // (SqueezeDSP fork) the input short of a partition; CACHE_VERSION 6
 	} {
 		if err := enc.Encode(v); err != nil {
 			return nil, err
@@ -648,19 +779,23 @@ func (pc *PartitionedConvolver) DecodeState(data []byte) error {
 	buf := bytes.NewBuffer(data)
 	dec := gob.NewDecoder(buf)
 
+	var pending []float64
 	for _, p := range []any{
 		&pc.audioFFTRing,
 		&pc.ringPosition,
 		&pc.ringFilled,
 		&pc.previousChunkTail,
+		&pending,
 	} {
 		if err := dec.Decode(p); err != nil {
 			return err
 		}
 	}
 
-	pc.Buffer = make([]float64, 0)
+	// (SqueezeDSP fork) this track starts from the last one's input short of a partition, its outputs sent already
+	pc.Buffer = append(make([]float64, 0, PartitionedChunkSize*2), pending...)
 	pc.outputBuffer = make([]float64, 0)
+	pc.pending, pc.skip = nil, len(pending)
 	return nil
 }
 
@@ -673,6 +808,7 @@ func (pc *PartitionedConvolver) Reset() {
 	pc.ringPosition = 0
 	pc.Buffer = make([]float64, 0)
 	pc.outputBuffer = make([]float64, 0)
+	pc.pending, pc.skip = nil, 0
 	pc.previousChunkTail = make([]float64, PartitionedOverlapSize)
 
 	if pc.DebugOn {

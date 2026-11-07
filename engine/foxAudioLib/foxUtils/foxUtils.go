@@ -19,6 +19,8 @@ func CalculateChunkSize(sampleRate int, mode ProcessingMode) int {
         }
     case ModeStreaming:
         switch {
+        case sampleRate >= 2822400: // SqueezeDSP fork, the native DSD round: the DSP at a DSD rate, 23 ms at DSD64
+            return 65536
         case sampleRate >= 176400:
             return 8192
         default:

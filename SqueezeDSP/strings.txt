@@ -30,22 +30,19 @@ PLUGIN_SQUEEZEDSP_PCM_NEEDS_HEADER
 	EN	PCM needs a player that reads a WAV header (squeezelite started with -W). This player gets FLAC.
 
 PLUGIN_SQUEEZEDSP_REDUCED_LIMIT
-	EN	Bitrate Limiting is set for this player in LMS, so it gets MP3 at %s kbps. The DSP runs at the rate of each track, and nothing is upsampled.
+	EN	Bitrate Limiting is set for this player in LMS, so it gets MP3 at %s kbps.
 
 PLUGIN_SQUEEZEDSP_REDUCED_APP
-	EN	This player asks for a smaller stream, so it gets %s. The DSP runs at the rate of each track, and nothing is upsampled.
+	EN	This player asks for a smaller stream, so it gets %s.
 
 PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_REDUCED
-	EN	Not for a smaller stream (MP3, Opus or Ogg Vorbis): the DSP runs at the rate of each track.
+	EN	Not for a smaller stream (MP3, Opus or Ogg Vorbis).
 
 PLUGIN_SQUEEZEDSP_NO_DSP_BELOW_FLAC
 	EN	This player cannot take 24-bit FLAC, so SqueezeDSP stays off for it.
 
 PLUGIN_SQUEEZEDSP_UPSAMPLE
 	EN	Upsample
-
-PLUGIN_SQUEEZEDSP_UPSAMPLE_HELP
-	EN	Resample every track before the DSP, with the SoX resampler (soxr) in ffmpeg, in floating point. Target rate: Per family sends each track to the highest rate in its own family (44.1 or 48 kHz) that this player takes; Player max sends every track, DSD included, to the highest rate the player reports, so it never changes rate between tracks (the other family's tracks then take a non-integer ratio, which costs a little more CPU). A track already at its target rate goes to the DSP as it is, without the resampler. A DSF file is decoded by our own DSD decoder straight to the target (see DSD); a DFF file gets there through the same soxr and options, always at linear phase: ffmpeg's soxr has no other. Inter-sample peaks then reach the DSP as real samples: the log summary's peaks show them, and Preamp gives them headroom. Phase: linear rings evenly before and after a transient; minimum has no ringing before it; intermediate is in between. Intermediate and minimum use SoX's own resampler, which works in fixed point, so 6 dB is taken off before it and put back after: the level is the same, and only an inter-sample peak above +6 dBTP is clipped. Precision: the filter's accuracy in bits. Passband: where the filter starts to roll off, as a share of the track's Nyquist frequency: 99% by default per family; with Player max 95% by default and at most 95% (a higher choice plays at 95%); Auto lets soxr choose its own edge (flat to about 92%). Steep: flat right up to the passband edge (a Chebyshev passband). The DSP then runs at the higher rate and uses more CPU.
 
 PLUGIN_SQUEEZEDSP_DSD
 	EN	DSD
@@ -62,26 +59,188 @@ PLUGIN_SQUEEZEDSP_DSD_GAIN
 PLUGIN_SQUEEZEDSP_DSD_NONE
 	EN	None
 
+PLUGIN_SQUEEZEDSP_DSD_OUT
+	EN	DSD out
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_HELP
+	EN	Play a DSF file as DSD: our own decoder takes it to PCM for the DSP (with the DSD low-pass and gain above), and our own modulator takes it back to DSD, sent to the player as a DSF stream. Only for a player that takes native DSD itself (it lists dsf). Rate: the DSD rate out, the source's own or a fixed one; Max rate caps either. Modulator: Standard, CLANS or Adaptive. DSP rate: the PCM rate the DSP runs at in between; DXD (352.8 kHz) keeps the most of the source, 176.4 kHz takes less CPU, for a slower server; Native runs it at a DSF's own DSD rate, for a fast server. A DFF file, and every PCM source, play as PCM.
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_NO_DSF
+	EN	This player does not take native DSD, so DSD plays as PCM.
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_NO_REDUCED
+	EN	Not for a smaller stream (MP3, Opus or Ogg Vorbis): DSD plays in it as PCM.
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_RATE
+	EN	Rate
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_SOURCE
+	EN	Source
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_MOD
+	EN	Modulator
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_STANDARD
+	EN	Standard
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_ADAPTIVE
+	EN	Adaptive
+
+PLUGIN_SQUEEZEDSP_DSD_OUT_DSP
+	EN	DSP rate
+
+PLUGIN_SQUEEZEDSP_DSD_NATIVE
+	EN	Native
+
+PLUGIN_SQUEEZEDSP_DSD_INTEGRATOR
+	EN	Integrator
+
+PLUGIN_SQUEEZEDSP_DSD_INT_LIN
+	EN	Linear
+
+PLUGIN_SQUEEZEDSP_DSD_INT_INT
+	EN	Intermediate
+
+PLUGIN_SQUEEZEDSP_DSD_INT_MIN
+	EN	Minimum
+
+PLUGIN_SQUEEZEDSP_DSD_NATIVE_ONLY
+	EN	With the DSP rate Native
+
 PLUGIN_SQUEEZEDSP_LIVE_DSD_DECODER
 	EN	Our decoder
 
 PLUGIN_SQUEEZEDSP_LIVE_DSD_LOWPASS
 	EN	%s low-pass
 
+PLUGIN_SQUEEZEDSP_LIVE_DSD_OUT_MODULATOR
+	EN	%s modulator
+
+PLUGIN_SQUEEZEDSP_LIVE_TAB_DSP
+	EN	DSP
+
+PLUGIN_SQUEEZEDSP_LIVE_TAB_SRC
+	EN	SRC
+
+PLUGIN_SQUEEZEDSP_LIVE_TAB_PCM
+	EN	PCM
+
+PLUGIN_SQUEEZEDSP_LIVE_TAB_DSD
+	EN	DSD
+
+PLUGIN_SQUEEZEDSP_LIVE_TAB_PEQ
+	EN	PEQ
+
+PLUGIN_SQUEEZEDSP_LIVE_TAB_CONV
+	EN	Convolution
+
+PLUGIN_SQUEEZEDSP_LIVE_TAB_XFEED
+	EN	Crossfeed
+
+PLUGIN_SQUEEZEDSP_SRC
+	EN	Sample Rate Converter
+
+PLUGIN_SQUEEZEDSP_SRC_HELP
+	EN	Off: every track goes out as it is, PCM at its own rate and a DSD file as DSD Processing's Output says. PCM: every track, DSD included, goes to the player's top rate, in its own family (Per family) or one rate for all (Player max), up to the Max rate. DSD: every track, PCM included, goes out as DSD at the DSD rate you choose (the highest the player and its DAC take), through the DSP at DSD Processing's DSP rate and our own modulator; only for a player that takes native DSD itself (it lists dsf). PCM and DSD each have their own filters, shown with their options: one for a 44.1 or 48 kHz track, one for hi-res, the engine resampling in 64-bit floating point. Each is a filter, its length and its phase. Kaiser and Gaussian remove every image above the track's band; Half-band, Slow roll-off and Non-ringing let some through, for listening (going down in rate they run as Kaiser short). Phase: linear rings evenly before and after a transient; minimum has no ringing before it; intermediate is in between. Length: short rings for the least time; long keeps more of the top of the band flat.
+
+PLUGIN_SQUEEZEDSP_SRC_CONVERT_TO
+	EN	Convert to
+
+PLUGIN_SQUEEZEDSP_SRC_DSD_RATE
+	EN	DSD rate
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_CD
+	EN	Filter, 44.1/48 kHz sources
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_HIRES
+	EN	Filter, hi-res sources
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_KAISER
+	EN	Kaiser
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_GAUSS
+	EN	Gaussian
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_HALFBAND
+	EN	Half-band
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_SLOW
+	EN	Slow roll-off
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_NONRING
+	EN	Non-ringing
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_SHORT
+	EN	Short
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_MEDIUM
+	EN	Medium
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_LONG
+	EN	Long
+
+PLUGIN_SQUEEZEDSP_SRC_FILTER_XLONG
+	EN	Extra-long
+
+PLUGIN_SQUEEZEDSP_LIVE_ENGINE_UP
+	EN	the engine
+
+PLUGIN_SQUEEZEDSP_PCM_PROC
+	EN	PCM Processing Settings
+
+PLUGIN_SQUEEZEDSP_PCM_PROC_HELP
+	EN	Output: what a PCM stream goes out as, 24-bit FLAC (the default, for any player) or 24-bit PCM as WAV, for a player that reads a WAV header (squeezelite started with -W). PCM tracks are resampled by the filters under the Sample Rate Converter's PCM options.
+
+PLUGIN_SQUEEZEDSP_DSD_PROC
+	EN	DSD Processing Settings
+
+PLUGIN_SQUEEZEDSP_DSD_PROC_HELP
+	EN	Output (with the Sample Rate Converter off): a DSF file goes out as PCM, or as DSD at its own rate, for a player that takes native DSD itself (it lists dsf); a DFF file goes out as PCM. Decoder: how our own decoder turns DSD into PCM for the DSP. Low-pass: DSD carries strong noise above the audio band, and the filter removes it (30 kHz recommended, 24 kHz conservative, 50 kHz permissive; None passes it on). Gain: DSD plays 6 dB below PCM, and +6 dB brings it level. Integrator (with the DSP rate Native): the low-pass's shape at the DSD rate, Linear, Intermediate or Minimum phase, or Non-ringing, a gentle roll-off that never rings. Encoder: how our own modulator makes DSD. Modulator: Standard, CLANS or Adaptive. DSP rate: the PCM rate the DSP runs at before it; DXD (352.8 kHz) keeps the most of the source, 176.4 kHz takes less CPU, for a slower server.
+
+PLUGIN_SQUEEZEDSP_DSD_TO_PCM
+	EN	DSD to PCM
+
+PLUGIN_SQUEEZEDSP_DSD_TO_DSD
+	EN	DSD to DSD
+
+PLUGIN_SQUEEZEDSP_DSD_DECODER
+	EN	Decoder
+
+PLUGIN_SQUEEZEDSP_DSD_ENCODER
+	EN	Encoder
+
+PLUGIN_SQUEEZEDSP_LIVE_DSP_OFF_TAB
+	EN	DSP is off for this player (DSP tab): these apply when it is on.
+
+PLUGIN_SQUEEZEDSP_LIVE_DSP_CLASSIC
+	EN	ReplayGain, delay and loudness are on the classic page for now.
+
+PLUGIN_SQUEEZEDSP_LIVE_PEQ_CLASSIC
+	EN	The equaliser, its graph and importing filters are on the classic page for now.
+
+PLUGIN_SQUEEZEDSP_LIVE_CONV_CLASSIC
+	EN	The room-correction impulse (FIR) and its strength are on the classic page for now.
+
+PLUGIN_SQUEEZEDSP_LIVE_XFEED_CLASSIC
+	EN	Crossfeed is on the classic page for now.
+
+PLUGIN_SQUEEZEDSP_LIVE_OPEN_CLASSIC
+	EN	Open the classic page
+
+PLUGIN_SQUEEZEDSP_LIVE_CLIPPING
+	EN	Clipping
+
+PLUGIN_SQUEEZEDSP_LIVE_CLIP_NONE
+	EN	None: last track's peak %s
+
+PLUGIN_SQUEEZEDSP_LIVE_CLIP_YES
+	EN	Clipped: last track's peak %s
+
+PLUGIN_SQUEEZEDSP_LIVE_CLIP_HISTORY
+	EN	The last tracks' peaks, oldest first
+
 PLUGIN_SQUEEZEDSP_LIVE_DSD_NO_LOWPASS
 	EN	no low-pass
-
-PLUGIN_SQUEEZEDSP_UPSAMPLE_PHASE
-	EN	Phase
-
-PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_SOX
-	EN	Intermediate and minimum phase need SoX, and LMS finds none.
-
-PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_SOXR
-	EN	Upsampling needs ffmpeg with the SoX resampler (soxr). The ffmpeg LMS uses has no soxr:
-
-PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_FFMPEG
-	EN	Upsampling needs ffmpeg with the SoX resampler (soxr), and LMS finds no ffmpeg.
 
 PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_MAX
 	EN	This player does not report its highest sample rate, so it cannot be upsampled.
@@ -103,12 +262,6 @@ PLUGIN_SQUEEZEDSP_UPSAMPLE_MAX
 
 PLUGIN_SQUEEZEDSP_UPSAMPLE_MAX_NONE
 	EN	No limit
-
-PLUGIN_SQUEEZEDSP_UPSAMPLE_STEEP
-	EN	Steep filter
-
-PLUGIN_SQUEEZEDSP_UPSAMPLE_STEEP_DESC
-	EN	Chebyshev: keeps the treble flat right up to the filter's cutoff, instead of rolling it off gently just before it.
 
 PLUGIN_SQUEEZEDSP_LOUDNESS
 	EN	Loudness
@@ -380,18 +533,6 @@ PLUGIN_SQUEEZEDSP_HTML_ADVANCED
 PLUGIN_SQUEEZEDSP_LIVE_DSP
 	EN	DSP
 
-PLUGIN_SQUEEZEDSP_LIVE_DSP_OFF
-	EN	DSP is off: this player plays as if SqueezeDSP were not installed. Upsample, preamp, balance and width take effect when it is on.
-
-PLUGIN_SQUEEZEDSP_LIVE_PRECISION
-	EN	Precision
-
-PLUGIN_SQUEEZEDSP_LIVE_PASSBAND
-	EN	Passband
-
-PLUGIN_SQUEEZEDSP_LIVE_PASSBAND_DEFAULT
-	EN	Auto
-
 PLUGIN_SQUEEZEDSP_LIVE_STEEP
 	EN	Steep (Chebyshev)
 
@@ -425,26 +566,14 @@ PLUGIN_SQUEEZEDSP_LIVE_SPEED
 PLUGIN_SQUEEZEDSP_LIVE_REALTIME
 	EN	%sx realtime
 
-PLUGIN_SQUEEZEDSP_LIVE_SLOWEST
-	EN	slowest stage: %s
-
-PLUGIN_SQUEEZEDSP_LIVE_CPU
-	EN	CPU %s% of one core
+PLUGIN_SQUEEZEDSP_LIVE_TOTAL_CPU
+	EN	of total CPU at real time
 
 PLUGIN_SQUEEZEDSP_LIVE_MEASURING
 	EN	Measuring...
 
-PLUGIN_SQUEEZEDSP_LIVE_NO_PROC
-	EN	The processing speed is read from the processes LMS runs, which only a Linux server shows.
-
 PLUGIN_SQUEEZEDSP_LIVE_NOT_IN_PATH
 	EN	SqueezeDSP is not in this player's signal path.
-
-PLUGIN_SQUEEZEDSP_LIVE_FINISHED
-	EN	The whole track has been processed and sent to the player.
-
-PLUGIN_SQUEEZEDSP_LIVE_NEXT_TRACK
-	EN	Processing the next track: %s
 
 PLUGIN_SQUEEZEDSP_LIVE_STOPPED
 	EN	Not playing

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Foxenfurter/foxAudioLib/foxFilters"
 	"github.com/Foxenfurter/foxAudioLib/foxLog"
+	"github.com/Foxenfurter/foxAudioLib/foxUpsampler"
 )
 
 func InitializeSettings() (*Arguments, *AppSettings, *ClientConfig, *foxLog.Logger, error) {
@@ -78,13 +79,28 @@ Options:
   --input=FILE        Input file path (if not stdin)
   --output=FILE       Output file path (if not stdout)
   --bitsout=N         Output bit depth (8-32, default 24)
-  --samplerate=N      Sample rate in Hz (required when --formatin=PCM)
+  --samplerate=N      Sample rate in Hz (required when --formatin=PCM); with --formatin=DSD the rate to decode to, or
+                      native: the DSD rate itself, the DSP there, through the player's DSDIntegrator (--formatout=DSF)
   --bitsin=N          Input bit depth (required when --formatin=PCM)
   --channels=N        Number of audio channels (required when --formatin=PCM)
   --skip=MM:SS[.FFF]  Skip to a time position (e.g., 01:23 or 01:23.456)
   --trackurl=URL      URL for remote album detection (optional)
   --maxSampleRate=N   Maximum supported sample rate for Player (optional)
-  --wavlength=SECONDS Length a WAV output's header states (optional; default from the input)
+  --wavlength=SECONDS Length a WAV or DSF output's header states (optional; default from the input); for DSF an
+                      upper bound: the stream ends with the input, its last block zero-padded
+  --dsdrate=N         DSF output: the DSD rate (2822400, 5644800, 11289600 or 22579200, or source: a DSD input's own);
+                      without it, the player's DSDOutRate, else source
+  --dsdmax=N          DSF output: the highest DSD rate (one of the four); without it, the player's DSDOutMax
+  --dsdmod=KIND       DSF output: the modulator, standard (default), clans or adaptive
+  --dsdoutgain=DB     DSF output: gain before the modulator, -24 to 6 dB (default 0: PCM full scale = full swing)
+  --dsdsource=KIND    DSF output: what the source was, dsd (default: the designs for SACD's peaks) or pcm (a PCM
+                      source at -6.02 dB: designs with less noise, held 2 dB over its full scale)
+  --upsample=N        A PCM input resampled here, before the DSP, to N Hz, up or down (44100 to 1536000; a
+                      player's PCM target, the converter's 705600 for DSF out), by the engine's own filters
+  --upfilter=CD,HIRES With --upsample: the filter for a source at 48 kHz and under, then for one above (each
+                      Kaiser short-, long- or xlong-, Gaussian gauss-short-, gauss-medium- or gauss-long-,
+                      halfband- or slow-, then lin, int or min; or nonring; one value: both; default
+                      short-int,short-lin)
   --debug           Enable debug logging
 
 
@@ -185,6 +201,7 @@ type Arguments struct {
 	OutPath         string
 	OutBits         int
 	InputSampleRate int
+	DSDNative       bool // --samplerate=native: a DSD input decoded at its own DSD rate, for DSF out (the native round)
 	PCMBits         int
 	PCMChannels     int
 	skipTime        string        // Change to string for input and local only
@@ -198,13 +215,23 @@ type Arguments struct {
 	DSDGainSet      bool
 	untilTime       string // --until: where a DSD input ends, m:ss.ff from the file's start (LMS's %v)
 	EndTime         time.Duration
+	DSDRate         int     // --dsdrate: DSF output's DSD rate (0: not given)
+	DSDRateSource   bool    // --dsdrate=source: the DSD input's own rate
+	DSDMax          int     // --dsdmax: the highest DSD rate out (0: none)
+	DSDMod          string  // --dsdmod: standard, clans or adaptive
+	DSDOutGain      float64 // --dsdoutgain: dB before the modulator
+	DSDSource       string  // --dsdsource: dsd or pcm ("": dsd)
+	UpsampleRate    int     // --upsample: a PCM input's rate before the DSP, up or down (0: as it comes)
+	UpFilterCD      foxUpsampler.Choice
+	UpFilterHiRes   foxUpsampler.Choice
+	upFilterSet     bool
 	Debug           bool
 }
 
 // ReadArgs reads the command-line arguments and returns an Arguments object.
 // Argument labels are case-insensitive.
 func ReadArgs() (*Arguments, error) {
-	args := &Arguments{}
+	args := &Arguments{UpFilterCD: foxUpsampler.DefaultCD, UpFilterHiRes: foxUpsampler.DefaultHiRes}
 
 	// Get executable name
 	if len(os.Args) > 0 {
@@ -249,9 +276,25 @@ func ReadArgs() (*Arguments, error) {
 		if args.InPath == "" {
 			return nil, fmt.Errorf("DSD input needs --input <file>")
 		}
-		if args.InputSampleRate == 0 {
+		if args.InputSampleRate == 0 && !args.DSDNative {
 			return nil, fmt.Errorf("DSD input needs --samplerate, the PCM rate to decode to")
 		}
+	}
+	// native: the DSP at a DSD input's own rate, back out as DSD; refused anywhere else, not ignored
+	if args.DSDNative && (strings.ToUpper(args.InputFormat) != "DSD" || strings.ToUpper(args.OutputFormat) != "DSF") {
+		return nil, fmt.Errorf("--samplerate=native needs --formatin=DSD and --formatout=DSF")
+	}
+	// DSF: native DSD out (its rate from --dsdrate, else the player's settings, else the source's); the DSD out flags
+	// are refused without it, not ignored
+	if strings.ToUpper(args.OutputFormat) != "DSF" && (args.DSDRate != 0 || args.DSDRateSource || args.DSDMax != 0 || args.DSDMod != "" || args.DSDOutGain != 0 || args.DSDSource != "") {
+		return nil, fmt.Errorf("--dsdrate, --dsdmax, --dsdmod, --dsdoutgain and --dsdsource need --formatout=DSF")
+	}
+	// the converter upsamples PCM; a DSD input is decoded straight to --samplerate. Refused, not ignored.
+	if args.UpsampleRate > 0 && strings.ToUpper(args.InputFormat) == "DSD" {
+		return nil, fmt.Errorf("--upsample needs a PCM input (a DSD input decodes to --samplerate)")
+	}
+	if args.upFilterSet && args.UpsampleRate == 0 {
+		return nil, fmt.Errorf("--upfilter needs --upsample")
 	}
 	if args.untilTime != "" {
 		if strings.ToUpper(args.InputFormat) != "DSD" { // only the DSD decoder honours it: refused, not ignored
@@ -265,6 +308,11 @@ func ReadArgs() (*Arguments, error) {
 	}
 
 	return args, nil
+}
+
+// IsDSDRate: DSD64, 128, 256 or 512, the rates DSF output writes.
+func IsDSDRate(v int) bool {
+	return v == 2822400 || v == 5644800 || v == 11289600 || v == 22579200
 }
 
 // parseMinSec reads LMS's m:ss.ff (%t, %v) as a duration.
@@ -303,17 +351,22 @@ func parseArgs(args *Arguments) error {
 		if strings.HasPrefix(arg, "--") {
 			flagName := strings.ToLower(arg[2:]) // Remove "--" and lowercase
 			value := ""
+			// the value as given: lowercasing "--name=value" whole lowercased a track's URL too, so the next track's
+			// engine never matched the plugin's note to the residual (THE GAPLESS ROUND, found live 2026-11-05)
+			raw := ""
 
 			// Check for equals sign
 			if strings.Contains(flagName, "=") {
 				parts := strings.SplitN(flagName, "=", 2)
 				flagName = parts[0]
 				value = parts[1]
+				raw = arg[strings.IndexByte(arg, '=')+1:]
 			} else {
 				// No equals – if this flag requires a value, take next arg
 				if !noValueFlags[flagName] {
 					if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "--") {
 						value = os.Args[i+1]
+						raw = value
 						i++ // skip the value in next iteration
 					} else {
 						return fmt.Errorf("flag --%s requires a value", flagName)
@@ -354,6 +407,10 @@ func parseArgs(args *Arguments) error {
 					args.OutBits = 24
 				}
 			case "samplerate":
+				if strings.EqualFold(value, "native") {
+					args.DSDNative, args.InputSampleRate = true, 0
+					break
+				}
 				val, err := strconv.Atoi(value)
 				if err != nil {
 					return fmt.Errorf("invalid value for --samplerate: %w", err)
@@ -376,7 +433,7 @@ func parseArgs(args *Arguments) error {
 			case "skip":
 				args.skipTime = value
 			case "trackurl":
-				args.TrackURL = value
+				args.TrackURL = raw
 			case "maxsamplerate":
 				val, err := strconv.Atoi(value)
 				if err != nil {
@@ -404,6 +461,60 @@ func parseArgs(args *Arguments) error {
 				args.DSDGain, args.DSDGainSet = val, true
 			case "until":
 				args.untilTime = value
+			case "dsdrate":
+				if strings.ToLower(value) == "source" {
+					args.DSDRateSource = true
+					break
+				}
+				val, err := strconv.Atoi(value)
+				if err != nil || !IsDSDRate(val) {
+					return fmt.Errorf("invalid value for --dsdrate: %s (2822400, 5644800, 11289600, 22579200 or source)", value)
+				}
+				args.DSDRate = val
+			case "dsdmax":
+				val, err := strconv.Atoi(value)
+				if err != nil || !IsDSDRate(val) {
+					return fmt.Errorf("invalid value for --dsdmax: %s (2822400, 5644800, 11289600 or 22579200)", value)
+				}
+				args.DSDMax = val
+			case "dsdmod":
+				if v := strings.ToLower(value); v == "standard" || v == "clans" || v == "adaptive" {
+					args.DSDMod = v
+				} else {
+					return fmt.Errorf("invalid value for --dsdmod: %s (standard, clans or adaptive)", value)
+				}
+			case "dsdoutgain":
+				val, err := strconv.ParseFloat(value, 64)
+				if err != nil || val < -24 || val > 6 {
+					return fmt.Errorf("invalid value for --dsdoutgain: %s (-24 to 6 dB)", value)
+				}
+				args.DSDOutGain = val
+			case "dsdsource":
+				if v := strings.ToLower(value); v == "dsd" || v == "pcm" {
+					args.DSDSource = v
+				} else {
+					return fmt.Errorf("invalid value for --dsdsource: %s (dsd or pcm)", value)
+				}
+			case "upsample":
+				val, err := strconv.Atoi(value)
+				if err != nil || val < 44100 || val > 1536000 {
+					return fmt.Errorf("invalid value for --upsample: %s (44100 to 1536000)", value)
+				}
+				args.UpsampleRate = val
+			case "upfilter":
+				cd, hi, two := strings.Cut(value, ",")
+				if !two {
+					hi = cd
+				}
+				c, err := foxUpsampler.ParseChoice(cd)
+				if err != nil {
+					return fmt.Errorf("invalid value for --upfilter: %w", err)
+				}
+				h, err := foxUpsampler.ParseChoice(hi)
+				if err != nil {
+					return fmt.Errorf("invalid value for --upfilter: %w", err)
+				}
+				args.UpFilterCD, args.UpFilterHiRes, args.upFilterSet = c, h, true
 			case "debug":
 				args.Debug = true
 			default:
@@ -491,6 +602,13 @@ type ClientConfig struct {
 	// set or not valid, and then the engine's own (--dsdcutoff, --dsdgain, or their defaults)
 	DSDCutoff *float64
 	DSDGain   *float64
+	// DSF output (SqueezeDSP fork): the player's DSDOutRate ("source", or one of the four DSD rates), DSDOutMax (one of
+	// them) and DSDOutMod (standard, clans or adaptive); "" / 0 = not set or not valid. A flag wins.
+	DSDOutRate string
+	DSDOutMax  int
+	DSDOutMod  string
+	// a native decode's integrator (the native round): the player's DSDIntegrator, lin, int, min or nonring; "" = lin
+	DSDIntegrator string
 }
 
 type ReplayGainConfig struct {
@@ -587,6 +705,24 @@ func buildConfig(data []byte) (*ClientConfig, error) {
 		case "DSDGain":
 			if v, ok := jsonFloat(value); ok && v >= -24 && v <= 12 {
 				config.DSDGain = &v
+			}
+		case "DSDOutRate": // "source" or a rate, as a number or its string
+			if v, ok := jsonFloat(value); ok && IsDSDRate(int(v)) && v == math.Trunc(v) {
+				config.DSDOutRate = strconv.Itoa(int(v))
+			} else if t := strings.ToLower(strings.Trim(string(value), "\" ")); t == "source" {
+				config.DSDOutRate = t
+			}
+		case "DSDOutMax":
+			if v, ok := jsonFloat(value); ok && IsDSDRate(int(v)) && v == math.Trunc(v) {
+				config.DSDOutMax = int(v)
+			}
+		case "DSDOutMod":
+			if t := strings.ToLower(strings.Trim(string(value), "\" ")); t == "standard" || t == "clans" || t == "adaptive" {
+				config.DSDOutMod = t
+			}
+		case "DSDIntegrator":
+			if t := strings.ToLower(strings.Trim(string(value), "\" ")); t == "lin" || t == "int" || t == "min" || t == "nonring" {
+				config.DSDIntegrator = t
 			}
 		case "ReplayGain":
 			var rg struct {

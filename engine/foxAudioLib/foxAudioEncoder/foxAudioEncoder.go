@@ -7,13 +7,17 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxAdapterEncoder"
+	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxDSDEncoder"
 	foxWavEncoder "github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxWavEncoder"
 	"github.com/Foxenfurter/foxAudioLib/foxLog"
+	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
 )
 
 const packageName = "foxAudioEncoder"
@@ -37,6 +41,34 @@ type AudioEncoder struct {
 	NumSamples          int64
 	PlayerMaxSampleRate int                               // Optional max sample rate supported by Player, for resampling if needed
 	adapterEncoder      *foxAdapterEncoder.EncoderAdapter // specific to this adapter
+
+	// DSF (SqueezeDSP fork): native DSD out. SampleRate stays the PCM rate in; Frames is the PCM frames the
+	// stream carries, which DSF states before the data.
+	DSDRate    int
+	DSDKind    string
+	DSDSource  string // "dsd" or "pcm" (foxDSDEncoder.Encoder.Source)
+	DSDGainDB  float64
+	Frames     int64
+	Bounded    bool // Frames an upper bound (foxDSDEncoder.Encoder.Bounded)
+	DSDEncoder *foxDSDEncoder.Encoder
+	// EndHold (SqueezeDSP fork, the gapless round): asked at the input's end; true when the next track goes on from
+	// this one's state, so DSF closes held (foxDSDEncoder CloseHeld) instead of flushing
+	EndHold func() bool
+
+	// Meter (SqueezeDSP fork): the encoding's own time, for the engine's busiest stage (foxSpeed); the writes to stdout,
+	// which wait for the reader (LMS, and so the player), left out. Fill: the engine's speed, the audio written to stdout
+	// and the time taken while the reader takes everything (foxSpeed.Fill). Neither with the adapter: its EncodeData
+	// feeds an encoder process and waits on it, so the engine reports no speed then.
+	Meter *foxSpeed.Meter
+	Fill  *foxSpeed.Fill
+	// Out (SqueezeDSP fork, 0.1.72.46): where the writes to stdout go when set, the engine's lead (foxSpeed.Lead)
+	Out io.Writer
+}
+
+// WritesStdout (SqueezeDSP fork): whether the encoder writes the stream to stdout itself, not to a file or through
+// the adapter's encoder process.
+func (myEncoder *AudioEncoder) WritesStdout() bool {
+	return myEncoder.Filename == "" && myEncoder.adapterEncoder == nil
 }
 
 // each Encoder must have these methods defined
@@ -95,6 +127,26 @@ func (myEncoder *AudioEncoder) Initialise() error {
 		}
 		//Create empty header - no header for PCM
 		myEncoder.debug(fmt.Sprintf(packageName + ":" + functionName + "  PCM Output..."))
+	case "DSF":
+		d := &foxDSDEncoder.Encoder{
+			DSDRate:     myEncoder.DSDRate,
+			InRate:      myEncoder.SampleRate,
+			NumChannels: myEncoder.NumChannels,
+			Frames:      myEncoder.Frames,
+			Bounded:     myEncoder.Bounded,
+			Kind:        myEncoder.DSDKind,
+			Source:      myEncoder.DSDSource,
+			GainDB:      myEncoder.DSDGainDB,
+			DebugFunc:   myEncoder.DebugFunc,
+		}
+		if err := d.Open(); err != nil {
+			return err
+		}
+		myEncoder.DSDEncoder = d
+		myEncoder.Encoder = d
+		if err := myEncoder.writeHeader(); err != nil {
+			return fmt.Errorf(packageName+":"+functionName+":error writing DSF header: %w", err)
+		}
 	case "FLC", "MP3":
 		AdapterPath := myEncoder.AdapterPath
 		if AdapterPath == "" {
@@ -163,14 +215,23 @@ func (myEncoder *AudioEncoder) EncodeHeader() error {
 // Call low level encoder to convert [][]float64 samples to bytesream of choice, and then call output writer
 func (myEncoder *AudioEncoder) EncodeData(buffer [][]float64) error {
 	const functionName = "EncodeData"
+	t0 := time.Now()
 	encodedData, err := myEncoder.Encoder.EncodeData(buffer)
 
 	if err != nil {
 		return errors.New(packageName + ":" + functionName + ": " + err.Error())
 	}
+	if myEncoder.adapterEncoder == nil {
+		myEncoder.Meter.Add(len(buffer[0]), time.Since(t0))
+	}
 	myEncoder.Peak = myEncoder.Encoder.GetPeak()
 	myEncoder.NumSamples += int64(len(buffer[0]))
-	return myEncoder.writeData(encodedData)
+	w0 := time.Now()
+	err = myEncoder.writeData(encodedData)
+	if myEncoder.Filename == "" && myEncoder.adapterEncoder == nil && myEncoder.SampleRate > 0 {
+		myEncoder.Fill.Wrote(float64(len(buffer[0]))/float64(myEncoder.SampleRate), t0, time.Since(w0))
+	}
+	return err
 }
 
 // EncoderStatus struct
@@ -277,10 +338,16 @@ func (myEncoder *AudioEncoder) WriteBytesChannel(
 func (myEncoder *AudioEncoder) EncodeSamplesChannel(
 	samplesChannel <-chan [][]float64) error {
 	const functionName = "EncodeSamplesChannel"
+	defer myEncoder.Fill.End() // a stream that ends inside the fill: its last part counts
 	var totalSamples int64
 	totalSamples = 0
-	bytesPerSample := myEncoder.BitDepth / 8 * myEncoder.NumChannels
-	targetSamples := TargetBytesPerWrite / bytesPerSample // ~1365
+	targetSamples := 0
+	if myEncoder.DSDEncoder != nil {
+		targetSamples = myEncoder.SampleRate / 20 // 50 ms of PCM: the DSF blocks come out as they fill
+	} else {
+		bytesPerSample := myEncoder.BitDepth / 8 * myEncoder.NumChannels
+		targetSamples = TargetBytesPerWrite / bytesPerSample // ~1365
+	}
 	buffer := make([][]float64, myEncoder.NumChannels)
 	loggedStart := false
 
@@ -326,6 +393,25 @@ func (myEncoder *AudioEncoder) EncodeSamplesChannel(
 		totalSamples += int64(len(buffer[0]))
 
 	}
+	// DSF: the interpolators' tail, the stated length and the last block; or, for a next track that goes on from it,
+	// only what is whole (CloseHeld)
+	if myEncoder.DSDEncoder != nil {
+		t0 := time.Now()
+		var last []byte
+		var err error
+		if myEncoder.EndHold != nil && myEncoder.EndHold() {
+			last, err = myEncoder.DSDEncoder.CloseHeld()
+		} else {
+			last, err = myEncoder.DSDEncoder.Close()
+		}
+		myEncoder.Meter.Add(0, time.Since(t0))
+		if err == nil {
+			err = myEncoder.writeData(last)
+		}
+		if err != nil {
+			return fmt.Errorf("%s:%s: DSF close: %w", packageName, functionName, err)
+		}
+	}
 	// Finalize adapter (if used)
 	if myEncoder.adapterEncoder != nil {
 		//finalData, err := myEncoder.adapterEncoder.Finish()
@@ -359,8 +445,12 @@ func (myEncoder *AudioEncoder) writeHeader() error {
 func (e *AudioEncoder) writeData(data []byte) error {
 	const functionName = "writeData"
 	if e.Filename == "" {
-		// Write directly to stdout without buffering
-		_, err := os.Stdout.Write(data)
+		// Write directly to stdout without buffering, or through the lead (Out)
+		var w io.Writer = os.Stdout
+		if e.Out != nil {
+			w = e.Out
+		}
+		_, err := w.Write(data)
 		if err != nil {
 			return fmt.Errorf("%s:%s: %w", packageName, functionName, err)
 		}

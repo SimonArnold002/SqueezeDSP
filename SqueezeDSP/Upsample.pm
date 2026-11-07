@@ -1,13 +1,15 @@
 package Plugins::SqueezeDSP::Upsample;
 # Upsampling (docs/fork-plan.md step 7), per player, default off.
 #
-# With Upsample on, a track is resampled BEFORE the engine by ffmpeg's soxr in floating point, to
-# the highest rate of its own family the player takes, and reaches the engine as 32-bit float
-# (the engine's raw path reads --bitsin=32 as IEEE float: ledger ENGINE RAW 32-BIT IS FLOAT).
-# sox cannot do this: its effects pass 32-bit integers, so `rate` clips every inter-sample peak
-# above full scale (ledger SOX CLIPS INSIDE RATE). In float the overs reach the engine as real
-# samples, its input and output peaks report them, and the player's Preamp gives the headroom
-# (ledger UPSAMPLE PLACEMENT).
+# With Upsample on (the Sample Rate Converter's PCM), a track reaches our engine at its own rate, on the route it takes
+# with Upsample off, and the engine resamples it itself before the DSP (--upsample, engine foxUpsampler): to the
+# highest rate of its own family the player takes, by its own two-stage filters, the player's choice for a source at
+# 48 kHz and under and another for hi-res (--upfilter; Simon 2026-11-04: "Separate for PCM", the converter to DSD has
+# its own). In 64-bit float from the decoder on, so an inter-sample peak reaches the DSP as a real sample, its meters
+# report it, and the player's Preamp gives the headroom (ledger UPSAMPLE PLACEMENT). A track above the target goes down
+# the same way. Until 0.1.72.37 ffmpeg's soxr resampled before the engine (sox's rate for the intermediate and minimum
+# phases, which clips inside rate: ledger SOX CLIPS INSIDE RATE), with the PCM tab's precision, passband and steep
+# options; those went with it.
 #
 # The rules carry the target as SQDSPUP_<44.1k family>_<48k family>, written per player from its
 # max. A conf rule cannot pick the family per track (its only rate selector is D, and a conf line
@@ -18,7 +20,8 @@ package Plugins::SqueezeDSP::Upsample;
 # 'fixed', every track to the player's top rate, so the player never changes rate between tracks
 # (Simon 2026-10-25: "upsample to a fixed single rate max rate being that of what the dac reports back
 # to LMS"). A fixed target is written as both families' (SQDSPUP_384000_384000), so the pick at stream
-# start needs nothing new; DSD follows it too (Configuration.pm dxdTarget), through soxr (dsdFilter).
+# start needs nothing new; DSD follows it too (Configuration.pm dxdTarget): our engine's decoder for a DSF,
+# ffmpeg (through soxr where it has it: dsdFilter) for a DFF.
 use strict;
 use Slim::Utils::Misc;
 use Slim::Player::TranscodingHelper;
@@ -37,36 +40,63 @@ use constant PLACEHOLDER => 'SQDSPUP_';
 # to get round any performance issues"). A max caps both families: 384k gives 352.8k / 384k, or 384k fixed.
 my @MAXRATES = ( 768000, 384000, 192000, 96000 );
 
-# the soxr precisions the page offers; above 20 bits soxr computes in 64-bit (soxr.c:439)
-my @PRECISIONS = ( 20, 24, 28, 33 );
-use constant DEFAULT_PRECISION => 28;
-
-# The passband (Simon 2026-11-02): per family 99% unless the player chose another; a fixed target 95% unless it chose
-# lower, and never above 95% (a higher one stored plays at 95%). Auto (0, soxr's own edge: flat to about 92% of the
-# track's Nyquist, -3 dB at 95%, measured) stays a choice wherever it is stored.
-use constant PASSBAND_FAMILY => 0.99;
-use constant PASSBAND_FIXED  => 0.95;
-
-# The filter phase. ffmpeg hands soxr only a quality number (libswresample/soxr_resample.c:48), so its
-# soxr is linear phase only. Intermediate and minimum go through sox's rate effect instead (rate.c is
-# libsoxr's parent: the same precision, passband and roll-off options, plus -I/-M), which passes 32-bit
-# integers and so clips an inter-sample peak inside rate (ledger SOX CLIPS INSIDE RATE): those rules take
-# 6 dB off before sox and put it back in float after it (TemplateConfig.pm $HEAD), so every phase plays at
-# the same level and an over up to +6 dBTP still reaches the engine's meters (ledger UPSAMPLE PHASE).
-my @PHASES = qw(linear intermediate minimum);
-
 my @TARGETS = qw(family fixed);
+
+# The Sample Rate Converter's DSD rates (Upsample 'dsd': every track to DSD, TemplateConfig template_DSFUP), the
+# player's UpsampleDSDRate; DSD64 by default, the rate every DSD DAC takes. No player reports the DSD rates it takes
+# (LMS reads only its MaxSampleRate and its formats), so it is the user's choice (Simon 2026-11-03: "purely a user
+# choice based on what the dac and player can handle").
+my @DSDRATES = ( 2822400, 5644800, 11289600, 22579200 );
+use constant DEFAULT_DSDRATE => 2822400;
+
+# The engine's filters (foxUpsampler): a track reaches the engine at its own rate and the engine resamples it itself,
+# for the converter to DSD to 705.6k (0.1.72.33: TemplateConfig $CONVRATE; Simon 2026-11-04: "for PCM to DSD we do it on
+# the high rate after resampling before we push it to the SDM") and with Upsample on to the PCM target (0.1.72.37).
+# The filter is the player's choice, one for a source at 48 kHz and under and one for hi-res, each short or long, then
+# linear, intermediate or minimum phase (Simon: "linear intermediate, minimun and offer short and long versions", "want
+# use choice for the filters with defaults set to what we consider best": short intermediate for CD rates, short linear
+# for hi-res; ledger STAGE 1 STUDY): the converter to DSD's UpsampleFilterCD and UpsampleFilterHiRes, PCM's own
+# UpsamplePCMFilterCD and UpsamplePCMFilterHiRes (Simon 2026-11-04: "Separate for PCM"), with the same defaults. The
+# filter sits at the lower rate's Nyquist, going up or down. Neither ffmpeg nor soxr is needed for either.
+# Since 0.1.72.44 a family of filters, picked from one dropdown by name, length and phase (Simon 2026-11-06, ledger THE
+# FILTER FAMILY): Kaiser (short, long, xlong: its names as before, so a stored choice carries over), Gaussian
+# (gauss-short, -medium, -long), Half-band and Slow roll-off (leaky, for listening), each linear, intermediate or
+# minimum, and Non-ringing (nonring), alone. The engine's Choices(), in its order; Status and TemplateConfig check
+# the same names.
+my @FILTERS = (
+    ( map { my $l = $_; map { "$l-$_" } qw(lin int min) } qw(short long xlong) ),
+    ( map { my $l = $_; map { "gauss-$l-$_" } qw(lin int min) } qw(short medium long) ),
+    ( map { my $f = $_; map { "$f-$_" } qw(lin int min) } qw(halfband slow) ),
+    'nonring',
+);
+sub filterNames { return @FILTERS }
+use constant DEFAULT_FILTER_CD    => 'short-int';
+use constant DEFAULT_FILTER_HIRES => 'short-lin';
+
+# The player's two filters as the engine's --upfilter takes them, "<CD>,<hi-res>": one the page offers, else the default.
+# filters: the converter to DSD's; pcmFilters: Upsample's (PCM).
+sub filters    { return _filters( shift, 'UpsampleFilterCD', 'UpsampleFilterHiRes' ) }
+sub pcmFilters { return _filters( shift, 'UpsamplePCMFilterCD', 'UpsamplePCMFilterHiRes' ) }
+
+sub _filters {
+    my ( $prefs, $cd, $hi ) = @_;
+    $prefs ||= {};
+    my @f = map {
+        my $v = lc( $prefs->{ $_->[0] } // '' );
+        ( grep { $_ eq $v } @FILTERS ) ? $v : $_->[1]
+    } ( [ $cd, DEFAULT_FILTER_CD ], [ $hi, DEFAULT_FILTER_HIRES ] );
+    return join( ',', @f );
+}
 
 our $INSTALLED = 0;
 my $orig;
 
 # ffmpeg as LMS's [ffmpeg] finds it (findbin: LMS's own Bin folders first, then the PATH),
-# and whether that binary has soxr. undef until checked, then cached for the server's life:
-# a newly installed ffmpeg needs a restart, as LMS's own binary cache does.
+# and whether that binary has soxr: DSD's decoder where our engine's is not (a DFF), and its
+# resampler (dsdFilter). undef until checked, then cached for the server's life: a newly
+# installed ffmpeg needs a restart, as LMS's own binary cache does.
 our $FFMPEG;
 our $SOXR;
-# sox as LMS's [sox] finds it, for the intermediate and minimum phases; cached the same way
-our $SOX;
 
 # The highest 44.1k-family and 48k-family rates at or below the player's max and $cap (cap(): CAP
 # unless given), or () when the max is unknown, so no upsample rule is written for that player. A
@@ -115,71 +145,39 @@ sub fill {
     return $command;
 }
 
-# The player's filter options from its settings, checked: they end up inside a shell command,
-# so only the values below ever get there. Precision: one the page offers, else 28 (soxr's very
-# high). Steep: soxr's Chebyshev passband, on or off. Passband: 0 (Auto, soxr's own), or 0.80-0.995
-# of Nyquist, the range ffmpeg clamps cutoff to (libswresample/soxr_resample.c); unset or anything
-# else, the target's default; a fixed target at most PASSBAND_FIXED. Phase: one of @PHASES, else
-# linear. Target: one of @TARGETS, else family. Max: one of @MAXRATES, else 0 (the player's own top
-# rate).
+# The player's rate options from its settings, checked: they end up inside a shell command, so only the values below
+# ever get there. Target: one of @TARGETS, else family. Max: one of @MAXRATES, else 0 (the player's own top rate). DSD
+# rate (the converter to DSD): one of @DSDRATES, else DSD64. The filters: filters and pcmFilters.
 sub options {
     my $prefs = shift || {};
-    my $p = $prefs->{UpsamplePrecision};
-    $p = DEFAULT_PRECISION unless defined $p && "$p" =~ /^\d+$/ && grep { $_ == $p } @PRECISIONS;
-    my $s = ( defined $prefs->{UpsampleSteep} && "$prefs->{UpsampleSteep}" =~ /^(?:1|on|true)$/i ) ? 1 : 0;
     my $t = defined $prefs->{UpsampleTarget} ? lc "$prefs->{UpsampleTarget}" : '';
     $t = 'family' unless grep { $_ eq $t } @TARGETS;
-    my $pb = $prefs->{UpsamplePassband};
-    $pb = !defined $pb ? undef
-        : "$pb" =~ /^0(?:\.0{1,4})?$/ ? 0
-        : ( "$pb" =~ /^(?:0?\.\d{1,4}|1(?:\.0{1,4})?)$/ && $pb >= 0.8 && $pb <= 0.995 ) ? 0 + sprintf( '%.3f', $pb ) : undef;
-    $pb //= PASSBAND_FAMILY;
-    $pb = PASSBAND_FIXED if $t eq 'fixed' && $pb > PASSBAND_FIXED;   # so a fixed target's default is 95% too
-    my $ph = defined $prefs->{UpsamplePhase} ? lc "$prefs->{UpsamplePhase}" : '';
-    $ph = 'linear' unless grep { $_ eq $ph } @PHASES;
     my $m = $prefs->{UpsampleMax};
     $m = ( defined $m && "$m" =~ /^\d+$/ && grep { $_ == $m } @MAXRATES ) ? 0 + $m : 0;
-    return ( precision => 0 + $p, steep => $s, passband => $pb, phase => $ph, target => $t, max => $m );
+    my $d = $prefs->{UpsampleDSDRate};
+    $d = ( defined $d && "$d" =~ /^\d+$/ && grep { $_ == $d } @DSDRATES ) ? 0 + $d : DEFAULT_DSDRATE;
+    return ( target => $t, max => $m, dsdrate => $d );
 }
 
-# ffmpeg's aresample options for soxr. internal_sample_fmt=dblp keeps swresample's buffers in
-# 64-bit float, so nothing between the decoder and the engine is ever an integer that can clip.
-sub ffOptions {
-    my $o = shift;
-    my $s = "resampler=soxr:precision=$o->{precision}:cheby=$o->{steep}";
-    $s .= ":cutoff=$o->{passband}" if $o->{passband};
-    return "$s:internal_sample_fmt=dblp";
+# The Sample Rate Converter's mode, from the player's Upsample (Simon 2026-11-03: "we choose either DSD or PCM here"):
+# 'on' is PCM (every track to its PCM target, as before), 'dsd' every track to DSD at the DSD rate, anything else off
+# (each track goes out as it is: PCM at its own rate, a DSF as the player's DSD output says, Configuration::dsdOut)
+sub mode {
+    my $v = lc( ( shift || {} )->{Upsample} // '' );
+    return $v eq 'on' ? 'pcm' : $v eq 'dsd' ? 'dsd' : 'off';
 }
 
-# DSD's resampler (TemplateConfig.pm $DSD): the ffmpeg that decodes DSD takes it to its target ($rate,
-# Configuration.pm dxdTarget) through soxr when this ffmpeg has soxr (Simon 2026-10-26: "we should look to
-# use ffmpeg soxr then for better quality"), with the player's filter options while Upsample is on ($up,
-# upsampleSpec's) and the defaults otherwise (precision 28, soxr's own passband). Linear phase on every
-# phase setting: ffmpeg's soxr has no other. Without soxr, '': ffmpeg's own resampler (its -ar) takes DSD
-# there, as before. The trailing space is the template's, so the rule without soxr is the old one.
+# DSD's resampler where ffmpeg decodes it (a DFF; TemplateConfig.pm $DSD): the ffmpeg that decodes DSD takes it to its
+# target ($rate, Configuration.pm dxdTarget) through soxr when this ffmpeg has soxr (Simon 2026-10-26: "we should look to
+# use ffmpeg soxr then for better quality"): precision 28 (very high, computed in 64-bit above 20 bits, soxr.c:439),
+# soxr's own passband, linear phase (ffmpeg hands soxr only a quality number, libswresample/soxr_resample.c:48), in
+# 64-bit float throughout (internal_sample_fmt=dblp). Until 0.1.72.37 Upsample's PCM options stood in for these while it
+# was on; they went with soxr's PCM route. Without soxr, '': ffmpeg's own resampler (its -ar) takes DSD there, as
+# before. The trailing space is the template's, so the rule without soxr is the old one.
 sub dsdFilter {
-    my ( $rate, $up ) = @_;
+    my $rate = shift;
     return '' unless soxr();
-    my %o = $up ? %$up : options( { UpsamplePassband => 0 } );   # Upsample off: soxr's own passband, as always
-    return "-af aresample=$rate:" . ffOptions( \%o ) . ' ';
-}
-
-# sox's rate options for the same filter (rate.c create(), the hidden options included): -d the
-# precision in bits (15-33), -I or -M the phase, -B the passband end in % (53-99.5; left out, sox
-# uses soxr's own formula, 100 - 5 / TO_3dB(rej)), -f -t the no-roll-off passband and the
-# high-precision clock that ffmpeg's cheby sets (SOXR_ROLLOFF_NONE | SOXR_HI_PREC_CLOCK).
-sub soxOptions {
-    my $o = shift;
-    my @a = ( '-d', $o->{precision}, $o->{phase} eq 'minimum' ? '-M' : '-I' );
-    push @a, '-B', 0 + sprintf( '%.1f', $o->{passband} * 100 ) if $o->{passband};
-    push @a, '-f', '-t' if $o->{steep};
-    return join( ' ', @a );
-}
-
-sub soxPath {
-    return $SOX if defined $SOX;
-    $SOX = eval { Slim::Utils::Misc::findbin('sox') } || '';
-    return $SOX;
+    return "-af aresample=$rate:resampler=soxr:precision=28:cheby=0:internal_sample_fmt=dblp ";
 }
 
 sub ffmpegPath { soxr(); return $FFMPEG }
@@ -197,14 +195,11 @@ sub _buildconf {
     return scalar `"$bin" -hide_banner -buildconf 2>&1`;
 }
 
-# Whether this player can upsample, and if not why: ('', 'hook', 'noffmpeg', 'nosoxr', 'nomax'),
-# then its targets under $cap (cap(); CAP unless given).
+# Whether this player can upsample, and if not why: ('', 'hook', 'nomax'), then its targets under $cap (cap(); CAP
+# unless given). The engine resamples, so neither ffmpeg nor soxr is needed (until 0.1.72.37: 'noffmpeg', 'nosoxr').
 sub available {
     my ( $client, $cap ) = @_;
     return ( 0, 'hook' ) unless $INSTALLED;
-    unless ( soxr() ) {
-        return ( 0, $FFMPEG ? 'nosoxr' : 'noffmpeg' );
-    }
     my $max = ( defined $client && $client->can('maxSupportedSamplerate') ) ? $client->maxSupportedSamplerate() : 0;
     my @t = targets( $max, $cap );
     return ( 0, 'nomax' ) unless @t;
@@ -213,13 +208,14 @@ sub available {
 
 # Wrap tokenizeConvertCommand2 (TranscodingHelper.pm:517). Both callers call it fully qualified
 # (Song.pm:577, Web/HTTP.pm:2792), so the wrap reaches them. It touches only a command carrying the
-# placeholder, works inside eval, and never hands ffmpeg a placeholder: on any error the 44.1k-family
+# placeholder, works inside eval, and never hands the engine a placeholder: on any error the 44.1k-family
 # target goes in, which still plays correctly.
 #
 # A track already at its target rate bypasses the resampler (Simon 2026-10-25: "No need to feed material
 # into it that is already the highest rate"): LMS tokenizes, in place of the Upsample rule, the rule the
 # player would have with Upsample off (Configuration::plainRule), with that rule's own capabilities, since
-# LMS takes START and END from its table by the rule's profile (TranscodingHelper.pm:560-569). Both are
+# LMS takes START and END from its table by the rule's profile (TranscodingHelper.pm:560-569). (The engine would pass
+# such a track as it is too, since it resamples, 0.1.72.37; the plain rule keeps the flags off its command.) Both are
 # swapped only for the call: LMS's transcoder and its table come back as they were, so a seek or a resume
 # comes through here again and is judged the same way.
 sub install {
@@ -261,6 +257,8 @@ sub _tokenize {
     # PCM mode's WAV header states the length still to play (WavLength.pm); it touches only our
     # WAV rules, and on any error the command stays as it was.
     my $wav = eval { Plugins::SqueezeDSP::WavLength::apply( $command, $_[0] ) };
+    # the engine's gapless note for this stream's player (Gapless.pm): our rules only; the command is not touched
+    eval { Plugins::SqueezeDSP::Gapless::streamStart( $_[0] ) };
     return defined $wav ? $wav : $command;
 }
 

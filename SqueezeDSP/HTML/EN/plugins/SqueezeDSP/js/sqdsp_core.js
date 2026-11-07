@@ -64,11 +64,7 @@ function LocalUpdateSettings() {
     LocalDisplayVals();    
     
     myRadio = LocalSetupToggle('DSP', SqueezeDSPData.Client.Bypass, true);
-    ToggleControl(myRadio, 'DSP_container', true);
-    ToggleControl(myRadio, 'DSP_container_signal', true);
-    LocalSetupOutput();
-    LocalSetupUpsample();
-    LocalSetupDSD();
+    LocalSetupAll();
 
     myRadio = LocalSetupToggle('Loudness', replaceNull(SqueezeDSPData.Client.Loudness.enabled,0));
     ToggleControl(myRadio, 'control_Loudness', false); 
@@ -161,7 +157,11 @@ function LocalSetupOutput() {
     if (dsp) dsp.disabled = !can.dspOk;
 
     let msg = '';
+    const toDsd = typeof srcMode === 'function' && srcMode() === 'dsd';
+    const orow = document.getElementById('control_OutputFormat');
+    if (orow) orow.classList.toggle('sqdsp-overridden', toDsd);
     if (!can.dspOk) msg = document.getElementById('NoDSPBelowFLAC_Help').value;
+    else if (toDsd) msg = '';
     else if (can.outReduced) {
         // a reduced stream overrides the output chosen here while it is due (Bitrate Limiting, or the app's own list)
         const names = { MP3: 'MP3 (320 kbps)', OPS: 'Opus (256 kbps)', OGG: 'Ogg Vorbis (quality 10)' };
@@ -170,23 +170,50 @@ function LocalSetupOutput() {
         msg = el ? el.value.replace('%s', limit ? can.outKbps : (names[can.outReduced] || can.outReduced)) : '';
     }
     else if (!can.wavOk) msg = document.getElementById('PCMNeedsHeader_Help').value;
-    if (note) note.textContent = msg;
-    const box = document.getElementById('body_output_note');
-    if (box) box.style.display = msg ? '' : 'none';
+    if (note) {
+        note.textContent = msg;
+        note.style.display = msg ? '' : 'none';
+    }
 }
 
-// Upsample (Upsample.pm), off by default; when on, the filter options show. readclientSettings
-// says whether this player can upsample (up_ok: an ffmpeg with soxr, a known max), why not, and
-// its two targets. A player that cannot shows Off whatever is stored, and the server writes no
-// upsample rules for it, whatever the page sends. Intermediate and minimum phase need sox (up_sox);
-// without it the server writes linear, and the page shows linear. The target rate is each track's own
-// family (up_targets) or one fixed rate, the player's top (up_fixed). A max rate caps both, up to the
-// player's top rate for its output (up_limits: FLAC out, WAV out); the page names the rates from it as the
-// server does (Upsample::targets), so a change of output or max rate shows before the server is asked.
+// The Sample Rate Converter (Upsample.pm, Configuration::dsdSpec; Simon 2026-11-03: "Call upsample Sample Rate Converter
+// and we choose either DSD or PCM here"): the player's Upsample 'off', 'on' (PCM: every track to its PCM target, as
+// before) or 'dsd' (every track to DSD at UpsampleDSDRate). readclientSettings says whether each can run: PCM (up_ok: the
+// stream-start hook, a known max; the engine resamples, since 0.1.72.37) and DSD (up_dsd_ok: the player lists dsf, and
+// the hook; the engine takes PCM tracks up itself, with the converter's own filters, since 0.1.72.33). One that cannot
+// shows as off, its button disabled with the reason on it, and the note says why when it is the one stored. PCM's rows
+// (target, max rate) show with PCM, the DSD rate and its filters with DSD. PCM's own filters are on the PCM tab (its
+// Resampler). The target rate is each track's own family (up_targets) or one fixed rate, the player's top (up_fixed); a
+// max rate caps both, up to the player's top rate for its output (up_limits: FLAC out, WAV out), named as the server
+// does (Upsample::targets).
 const UPSAMPLE_MAX_RATES = [768000, 384000, 192000, 96000];
-// the passband (Upsample.pm PASSBAND_FAMILY, PASSBAND_FIXED): per family 99% by default; a fixed target 95% by default
-// and at most that
-const UPSAMPLE_PASSBAND_FAMILY = 0.99, UPSAMPLE_PASSBAND_FIXED = 0.95;
+const DSD_RATE_NAMES = { 2822400: 'DSD64', 5644800: 'DSD128', 11289600: 'DSD256', 22579200: 'DSD512' };
+// The engine's filters (Upsample.pm @FILTERS; 0.1.72.44, Simon 2026-11-06: "choose the filters from a drop down ... the
+// name, lenght and phase"), in its order: [value, family, length, phase]. Kaiser's values as before, so a stored
+// choice carries over.
+const UPSAMPLE_FILTERS = (() => {
+    const out = [];
+    [['', 'Kaiser', ['short', 'long', 'xlong']], ['gauss-', 'Gaussian', ['short', 'medium', 'long']],
+     ['halfband-', 'Half-band', ['']], ['slow-', 'Slow roll-off', ['']]].forEach(([pre, fam, lens]) =>
+        lens.forEach(l => ['lin', 'int', 'min'].forEach(p => out.push([pre + (l ? l + '-' : '') + p, fam, l, p]))));
+    out.push(['nonring', 'Non-ringing', '', '']);
+    return out;
+})();
+const FILTER_LENGTH_NAMES = { short: 'Short', medium: 'Medium', long: 'Long', xlong: 'Extra-long' };
+const FILTER_PHASE_NAMES = { lin: 'Linear', int: 'Intermediate', min: 'Minimum' };
+// a filter dropdown's options, grouped by family, each named "Kaiser · Short · Linear"
+function fillFilters(sel) {
+    let group = null;
+    UPSAMPLE_FILTERS.forEach(([v, fam, l, p]) => {
+        if (!group || group.label !== fam) {
+            group = sel.appendChild(document.createElement('optgroup'));
+            group.label = fam;
+        }
+        const o = group.appendChild(document.createElement('option'));
+        o.value = v;
+        o.textContent = [fam, FILTER_LENGTH_NAMES[l], FILTER_PHASE_NAMES[p]].filter(Boolean).join(' · ');
+    });
+}
 function upsampleRates(limit, max) {
     const ceil = (max && (!limit || max < limit)) ? max : limit;
     if (!ceil) return null;
@@ -196,19 +223,48 @@ function upsampleRates(limit, max) {
     if (f48 > ceil) f48 = f44;
     return { f44: f44, f48: f48, top: Math.max(f44, f48) };
 }
-function LocalSetupUpsample() {
-    const can = (typeof SqueezeDSPPlayer === 'object' && SqueezeDSPPlayer) ? SqueezeDSPPlayer : { upOk: false, upWhy: '', upTargets: '', upFixed: '', upLimits: '', upFfmpeg: '', upSox: '' };
-    const c = SqueezeDSPData.Client;
-    const on = (replaceNull(c.Upsample, 'off') === 'on') && can.upOk;
-    const sw    = document.getElementById('chk_Upsample');
-    const opts  = document.getElementById('upsample-options');
-    const note  = document.getElementById('note_Upsample');
-
-    if (sw) {
-        sw.disabled = !can.upOk;
-        sw.checked = on;
-        sw.value = on ? 'on' : 'off';
+function playerCan() {
+    return (typeof SqueezeDSPPlayer === 'object' && SqueezeDSPPlayer) ? SqueezeDSPPlayer
+        : { dspOk: true, wavOk: false, upOk: false, upWhy: '', upTargets: '', upFixed: '', upLimits: '',
+            dsdOutOk: false, upDsdOk: false, outReduced: '' };
+}
+// the converter's mode as stored ('off', 'on', 'dsd': Upsample::mode) and as the server runs it
+function srcWant() {
+    const v = String(replaceNull(SqueezeDSPData.Client.Upsample, 'off')).toLowerCase();
+    return v === 'on' || v === 'dsd' ? v : 'off';
+}
+function srcMode() {
+    const can = playerCan(), want = srcWant();
+    return (want === 'on' && can.upOk) ? 'on' : (want === 'dsd' && can.upDsdOk) ? 'dsd' : 'off';
+}
+// why the converter to PCM cannot run (readclientSettings up_why), and why not to DSD
+function whyNoPcm(can) {
+    const ids = { nomax: 'UpsampleNoMax_Help', hook: 'UpsampleNoHook_Help', reduced: 'UpsampleNoReduced_Help' };
+    const el = ids[can.upWhy] ? document.getElementById(ids[can.upWhy]) : null;
+    return el ? el.value : '';
+}
+function whyNoDsd(can) {
+    if (!can.dsdOutOk) {
+        const el = document.getElementById(can.outReduced ? 'DSDOutNoReduced_Help' : 'DSDOutNoDsf_Help');
+        return el ? el.value : '';
     }
+    return whyNoPcm(can);
+}
+function helpText(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+function LocalSetupUpsample() {
+    const can = playerCan();
+    const c = SqueezeDSPData.Client;
+    const want = srcWant(), mode = srcMode();
+    const note = document.getElementById('note_Upsample');
+    document.querySelectorAll('#src-selector input[type="radio"]').forEach(el => {
+        const no = (el.value === 'on' && !can.upOk) ? whyNoPcm(can) : (el.value === 'dsd' && !can.upDsdOk) ? whyNoDsd(can) : '';
+        el.disabled = (el.value === 'on' && !can.upOk) || (el.value === 'dsd' && !can.upDsdOk);
+        el.checked = (el.value === mode);
+        const lab = el.closest('label');
+        if (lab) lab.title = no;
+    });
+    document.querySelectorAll('.sqdsp-src-pcm').forEach(r => { r.style.display = mode === 'on' ? '' : 'none'; });
+    document.querySelectorAll('.sqdsp-src-dsd').forEach(r => { r.style.display = mode === 'dsd' ? '' : 'none'; });
 
     // the target the server writes: one it knows, else each track's own family
     const targets = ['family', 'fixed'];
@@ -232,45 +288,29 @@ function LocalSetupUpsample() {
         el.checked = (v === max);
     });
 
-    // the phase the server writes: one it knows, and linear unless there is a sox
-    const phases = ['linear', 'intermediate', 'minimum'];
-    let phase = String(replaceNull(c.UpsamplePhase, 'linear')).toLowerCase();
-    if (!phases.includes(phase) || !can.upSox) phase = 'linear';
-    phases.forEach(p => {
-        const el = document.querySelector(`#upsample-phase-selector input[value="${p}"]`);
-        if (!el) return;
-        el.disabled = (p !== 'linear') && !can.upSox;
-        el.checked = (p === phase);
+    // the DSD rate (Upsample::options): one of the four, in digits alone, else DSD64
+    let dr = /^\d+$/.test(String(c.UpsampleDSDRate)) ? Number(c.UpsampleDSDRate) : 2822400;
+    if (!DSD_RATE_NAMES[dr]) dr = 2822400;
+    setChoice('dsd-rate-selector', dr, 2822400);
+    // its filters (0.1.72.33, Upsample::filters), and PCM's (0.1.72.37, Upsample::pcmFilters): a dropdown each of the
+    // filter family (0.1.72.44), filled once; the stored one in any case, else the default (Kaiser short intermediate
+    // for a CD-rate source, short linear for hi-res)
+    [['upsample-filter-cd-selector', 'UpsampleFilterCD', 'short-int'], ['upsample-filter-hires-selector', 'UpsampleFilterHiRes', 'short-lin'],
+     ['upsample-pcm-filter-cd-selector', 'UpsamplePCMFilterCD', 'short-int'], ['upsample-pcm-filter-hires-selector', 'UpsamplePCMFilterHiRes', 'short-lin']].forEach(([id, key, def]) => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        if (!sel.options.length) fillFilters(sel);
+        let v = String(replaceNull(c[key], def)).toLowerCase();
+        if (!UPSAMPLE_FILTERS.some(f => f[0] === v)) v = def;
+        sel.value = v;
     });
-
-    // the server's own defaults stand in for a value the page has no option for
-    setChoice('upsample-precision-selector', replaceNull(c.UpsamplePrecision, 28), 28);
-    // the passband: the target's default stands in for none; a fixed target offers 95% and lower, and shows a higher
-    // one stored at the 95% it plays at (kept as stored, so per family gets it back)
-    // (not replaceNull: Auto is 0, which it would take for none)
-    const pbDefault = target === 'fixed' ? UPSAMPLE_PASSBAND_FIXED : UPSAMPLE_PASSBAND_FAMILY;
-    const pbStored = c.UpsamplePassband;
-    let pb = (pbStored === undefined || pbStored === null || pbStored === '') ? pbDefault : Number(pbStored);
-    if (target === 'fixed' && pb > UPSAMPLE_PASSBAND_FIXED) pb = UPSAMPLE_PASSBAND_FIXED;
-    document.querySelectorAll('#upsample-passband-selector input[type="radio"]').forEach(el => {
-        el.disabled = target === 'fixed' && Number(el.value) > UPSAMPLE_PASSBAND_FIXED;
-    });
-    setChoice('upsample-passband-selector', pb, pbDefault);
-    const steep = document.getElementById('chk_UpsampleSteep');
-    if (steep) {
-        steep.checked = Number(replaceNull(c.UpsampleSteep, 0)) === 1;
-        steep.value = steep.checked ? 1 : 0;
-    }
-    if (opts) opts.style.display = on ? '' : 'none';
 
     let msg = '';
-    if (!can.upOk) {
-        const ids = { nosoxr: 'UpsampleNoSoxr_Help', noffmpeg: 'UpsampleNoFfmpeg_Help', nomax: 'UpsampleNoMax_Help', hook: 'UpsampleNoHook_Help',
-                      reduced: 'UpsampleNoReduced_Help' };
-        const el = document.getElementById(ids[can.upWhy] || 'UpsampleNoFfmpeg_Help');
-        msg = el ? el.value : '';
-        if (can.upWhy === 'nosoxr' && can.upFfmpeg) msg += ' ' + can.upFfmpeg;
-    } else if (on && can.upTargets) {
+    if (want === 'on' && mode !== 'on') {
+        msg = whyNoPcm(can);
+    } else if (want === 'dsd' && mode !== 'dsd') {
+        msg = whyNoDsd(can);
+    } else if (mode === 'on' && can.upTargets) {
         // from the limit and max rate when the server sent the limits, else as the server last named them
         const r = upsampleRates(limit, max);
         const fixed = target === 'fixed' && (r || can.upFixed);
@@ -279,10 +319,6 @@ function LocalSetupUpsample() {
         const rates = fixed ? khz(r ? r.top : can.upFixed)
                             : (r ? [r.f44, r.f48] : can.upTargets.split(',')).map(khz).join(' / ');
         msg = (el ? el.value + ' ' : '') + rates;
-        if (!can.upSox) {
-            const ns = document.getElementById('UpsampleNoSox_Help');
-            if (ns) msg += ' ' + ns.value;
-        }
     }
     if (note) {
         note.textContent = msg;
@@ -290,8 +326,6 @@ function LocalSetupUpsample() {
     }
 }
 
-// check the button of a choice group whose value is the stored one, compared as numbers ('0.90' is 0.9);
-// none matching, the fallback's
 // DSD: how our engine decodes a DSF (ledger OUR OWN DSD DECODER), the player's DSDCutoff and DSDGain, shown as the engine
 // takes them (LyrionDSPSettings buildConfig): unset, unreadable or out of range, its default, 30 kHz and 0 dB
 function LocalSetupDSD() {
@@ -303,6 +337,90 @@ function LocalSetupDSD() {
     setChoice('dsd-gain-selector', (gain >= -24 && gain <= 12) ? gain : 0, 0);
 }
 
+// DSD Processing's Output (Configuration::dsdOut): with the converter off, a DSF goes out as PCM ('0', the default) or as
+// DSD at its own rate ('1'), for a player that can have it (dsd_out_ok: it lists dsf itself, its output is not a reduced
+// stream); with the converter on, the converter decides (the row shown overridden, still editable). A player that cannot
+// shows DSD to PCM whatever is stored, and says why. The encoder's modulator and DSP rate as the plugin and the engine take them: the
+// modulator standard unless clans or adaptive (spaces and quotes trimmed, any case), the DSP at DXD unless 176400.
+function LocalSetupDSDOut() {
+    const can = playerCan();
+    const c = SqueezeDSPData.Client;
+    const mode = srcMode();
+    const on = !!can.dsdOutOk && /^(?:1|on|true)$/i.test(String(c.DSDOut));
+    document.querySelectorAll('#dsd-output-selector input[type="radio"]').forEach(el => {
+        el.disabled = el.value === '1' && !can.dsdOutOk;
+        el.checked = el.value === (on ? '1' : '0');
+    });
+    const row = document.getElementById('control_DSDOut');
+    if (row) row.classList.toggle('sqdsp-overridden', mode !== 'off');
+    let mod = String(replaceNull(c.DSDOutMod, 'standard')).replace(/^[ "]+|[ "]+$/g, '').toLowerCase();
+    if (!['standard', 'clans', 'adaptive'].includes(mod)) mod = 'standard';
+    document.querySelectorAll('#dsdout-mod-selector input[type="radio"]').forEach(el => { el.checked = (el.value === mod); });
+    // the DSP rate: DXD unless 176400, or native (Configuration::dsdNative: any case, quotes and spaces trimmed)
+    const dsp = /^[ "]*native[ "]*$/i.test(String(c.DSDOutDSP)) ? 'native' : String(c.DSDOutDSP) === '176400' ? '176400' : '352800';
+    document.querySelectorAll('#dsdout-dsp-selector input[type="radio"]').forEach(el => { el.checked = (el.value === dsp); });
+    // the integrator, as the engine takes the player's DSDIntegrator (lin unless int, min or nonring): greyed, still
+    // editable, with its why, unless the DSP rate is native
+    let integ = String(replaceNull(c.DSDIntegrator, 'lin')).replace(/^[ "]+|[ "]+$/g, '').toLowerCase();
+    if (!['lin', 'int', 'min', 'nonring'].includes(integ)) integ = 'lin';
+    document.querySelectorAll('#dsd-integrator-selector input[type="radio"]').forEach(el => { el.checked = (el.value === integ); });
+    const irow = document.getElementById('control_DSDIntegrator');
+    if (irow) irow.classList.toggle('sqdsp-overridden', dsp !== 'native');
+    const inote = document.getElementById('note_DSDIntegrator');
+    if (inote) {
+        inote.textContent = dsp === 'native' ? '' : helpText('DSDNativeOnly_Help');
+        inote.style.display = dsp === 'native' ? 'none' : '';
+    }
+    // nothing restated (Simon 2026-11-05: "any over explanation needs to go"): only why DSD is not on offer
+    let msg = '';
+    if (mode === 'off' && !can.dsdOutOk) {
+        msg = helpText(can.outReduced ? 'DSDOutNoReduced_Help' : 'DSDOutNoDsf_Help');
+    }
+    const note = document.getElementById('note_DSDOut');
+    if (note) {
+        note.textContent = msg;
+        note.style.display = msg ? '' : 'none';
+    }
+}
+
+// Every setup that reads the player's settings and the converter's mode, which each tab's notes follow
+function LocalSetupAll() {
+    LocalSetupOutput();
+    LocalSetupUpsample();
+    LocalSetupDSD();
+    LocalSetupDSDOut();
+    LocalSetupDspOff();
+}
+
+// DSP off: what it drives is dimmed (still editable), and each tab of it says so, as on the SqueezeDSP page; the presets
+// stay as they are (a preset can switch the DSP on)
+function LocalSetupDspOff() {
+    const on = String(SqueezeDSPData.Client.Bypass) === '0';
+    document.querySelectorAll('.sqdsp-pane[data-dsp]').forEach(p => p.classList.toggle('sqdsp-dimmed', !on));
+    document.querySelectorAll('.sqdsp-dspoff').forEach(n => { n.style.display = on ? 'none' : ''; });
+}
+
+// The tabs (Simon 2026-11-03, the SqueezeDSP page's, in its order): one pane shown, the last one picked remembered in
+// this browser. The PEQ graph redraws itself when its pane gets a size (index.html's ResizeObserver).
+const SQDSP_TABS = ['presets', 'dsp', 'src', 'pcm', 'dsd', 'peq', 'conv', 'xfeed'];
+function LocalShowTab(key) {
+    if (!SQDSP_TABS.includes(key)) key = 'presets';
+    SQDSP_TABS.forEach(t => {
+        const pane = document.getElementById('pane_' + t);
+        if (pane) pane.style.display = (t === key) ? '' : 'none';
+        const r = document.querySelector(`#sqdsp-tabs input[value="${t}"]`);
+        if (r) r.checked = (t === key);
+    });
+    try { localStorage.setItem('sqdsp-classic-tab', key); } catch (e) {}
+}
+function LocalInitTabs() {
+    let key = null;
+    try { key = localStorage.getItem('sqdsp-classic-tab'); } catch (e) { key = null; }
+    LocalShowTab(key || 'presets');
+}
+
+// check the button of a choice group whose value is the stored one, compared as numbers ('0.90' is 0.9);
+// none matching, the fallback's
 function setChoice(groupId, value, fallback) {
     const inputs = document.querySelectorAll('#' + groupId + ' input[type="radio"]');
     const same = (a, b) => Number(a) === Number(b) && String(a).trim() !== '' && String(b).trim() !== '';
@@ -438,7 +556,11 @@ function LocalDisplayLogSummary(logData) {
 	if (enabled == undefined) enabled = 0;
     try {
         for (let i = 1; i <= tracklimit; i++) {
-            const peakdBfs = logData.result ? logData.result['peakdBfs_' + i] : undefined;
+            let peakdBfs = logData.result ? logData.result['peakdBfs_' + i] : undefined;
+            // (SqueezeDSP fork, 0.1.72.46) a DSF track's peak is against DSD's full swing: read against DSD's 0 dB (50%,
+            // where PCM full scale goes), clipped only where the engine held samples at its limit (below)
+            const dsd = !!(logData.result && /^dsf$/i.test(String(logData.result['outtype_' + i] || '')));
+            if (dsd && isFinite(Number(peakdBfs))) peakdBfs = (Number(peakdBfs) + 6.02).toFixed(4);
             let peakStyle = 'peak peak-unknown';
 
             // Skip if peak is not a number
@@ -460,6 +582,11 @@ function LocalDisplayLogSummary(logData) {
                 else if (peakdBfs >= 0) peakStyle = 'peak peak-clipping';
 				else peakStyle = 'peak peak peak-unknown';
                 // No final else – unknown stays unknown*/
+            }
+            // (SqueezeDSP fork) a DSD track over its 0 dB is high, not clipped: the engine takes a PCM source 2 dB past it
+            if (dsd) {
+                if (Number(logData.result['held_' + i]) > 0) peakStyle = 'peak peak-clipping';
+                else if (peakStyle === 'peak peak-clipping') peakStyle = 'peak peak-high';
             }
 
             // Build tooltip with safe fallbacks

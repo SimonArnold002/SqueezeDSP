@@ -6,6 +6,12 @@
 #   sh engine/build.sh all              the six platforms the plugin ships
 #   sh engine/build.sh osx-arm64 ...    named platforms
 #   OUT=/some/dir sh engine/build.sh    write <OUT>/<platform>/ instead of the plugin's Bin
+#   SIMD=0 sh engine/build.sh           without Go's simd experiment: the engine as before 0.1.72.45
+#
+# GOEXPERIMENT=simd (Go's simd/archsimd, outside the Go 1 promise; GOTOOLCHAIN=local pins the Go it is built
+# with) gives amd64 engines AVX2 kernels for the upsampler's and the FIR's loops, run only on a CPU with AVX2 and
+# bit for bit the loops they stand for (poly_avx2.go, mac_avx2.go); other platforms build the same with or
+# without it.
 #
 # Go: $GO, else the PATH, else /usr/local/go/bin/go. GOTOOLCHAIN=local, so Go never fetches a
 # toolchain; the modules the source needs come from the Go proxy as source, cached in build/go
@@ -39,10 +45,12 @@ spec() {
 
 cache="$repo/build/go"
 mkdir -p "$cache"
-export GOTOOLCHAIN=local CGO_ENABLED=0 GOEXPERIMENT=jsonv2 GOFLAGS=-modcacherw
+experiment=jsonv2,simd
+[ "${SIMD:-1}" = 0 ] && experiment=jsonv2
+export GOTOOLCHAIN=local CGO_ENABLED=0 GOEXPERIMENT=$experiment GOFLAGS=-modcacherw
 export GOPATH="$cache/path" GOMODCACHE="$cache/mod" GOCACHE="$cache/build"
 
-echo "$("$go" version); Fox's base: $(awk '{ printf "%s %s  ", $1, substr($2, 1, 7) }' "$here/UPSTREAM")"
+echo "$("$go" version) GOEXPERIMENT=$experiment; Fox's base: $(awk '{ printf "%s %s  ", $1, substr($2, 1, 7) }' "$here/UPSTREAM")"
 for p in "$@"; do
 	s=$(spec "$p") || { echo "build.sh: unknown platform $p" >&2; exit 1; }
 	read -r goos goarch goarm dir name <<-END

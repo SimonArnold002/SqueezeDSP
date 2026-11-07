@@ -103,8 +103,29 @@ func getPlan(N int) *fftPlan {
     case FFTSize8192:
         return &plan8192
     default:
-        return nil
+        return bigPlan(N)
     }
+}
+
+// (SqueezeDSP fork) Plans above 8192 points, up to bigPlanMax, built on first use: the convolver's real FFT of
+// 2 x its partition runs as a complex FFT of the partition's length, which may be larger than 8192. Above them the
+// fallback runs, as before. A plan's twiddles are the fallback's (-2πk/m against -2π(k·N/m)/N: the scalings are
+// powers of two, exact in float64) and its butterflies the same sums in the same order, so the same bits
+// (TestBigPlansSameBits).
+const bigPlanMax = 1 << 17
+
+var (
+	bigPlans    [18]fftPlan
+	bigPlanOnce [18]sync.Once
+)
+
+func bigPlan(N int) *fftPlan {
+	if N <= FFTSize8192 || N > bigPlanMax || !IsPow2(N) {
+		return nil
+	}
+	i := bits.Len64(uint64(N)) - 1
+	bigPlanOnce[i].Do(func() { bigPlans[i] = buildPlan(N) })
+	return &bigPlans[i]
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

@@ -6,7 +6,8 @@ On Simon's Mac only LMS's bundled darwin binaries, the engine and tools built fr
 
 - `../../foxDSDReader_test.go`: the unit tests (`go test ./foxAudioDecoder/foxDSDReader/` in `engine/foxAudioLib`,
   with the env of `engine/build.sh`). Fixtures are made inside the tests.
-- `mutate.py <repo> <work>`: 23 mutants (the decoder, its stage 3 and its engine flags), each must turn its own test red.
+- `mutate.py <repo> <work>`: 24 mutants (the decoder, its stage 3, stage 1's loop as the bounds-check round left it, and
+  its engine flags), each must turn its own test red.
 - `e2e_rational.py` (the arguments below, then `<before engine> [nospeed]`): stage 3's targets (48k family, 705.6k
   from DSD64): the 44.1k-family targets byte-identical to an engine built from before stage 3, level and noise
   against today's `ffmpeg | engine`, seeks/cue ends/cue tracks byte-exact, a gapless join at 96k, refusals, and

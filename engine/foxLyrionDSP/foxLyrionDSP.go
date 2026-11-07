@@ -2,15 +2,20 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"runtime"
 
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxDSDEncoder"
 	"github.com/Foxenfurter/foxAudioLib/foxBufferedStdinReader"
+	"github.com/Foxenfurter/foxAudioLib/foxConvolverPartition"
+	"github.com/Foxenfurter/foxAudioLib/foxUpsampler"
 	"github.com/Foxenfurter/foxLyrionDSP/LyrionDSPProcessAudio"
 	"github.com/Foxenfurter/foxLyrionDSP/LyrionDSPSettings"
 	//"net/http/pprof" // Import for side effects
@@ -29,6 +34,12 @@ var (
 )
 
 func main() {
+	// (SqueezeDSP fork) --bench: this machine's figures for the loops the engine's speed rests on, then out (the plugin's
+	// /squeezedsp/bench runs it: plex's own figures with no ssh and no play test, Simon 2026-11-06)
+	if len(os.Args) == 2 && os.Args[1] == "--bench" {
+		bench(os.Stdout)
+		return
+	}
 	// Initialize settings, using LyrionDSPSettings - using a startup log to capture startup issues
 	fatalError := false
 	/*logFile, err := os.OpenFile("C:\\ProgramData\\Squeezebox\\Logs\\startup.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -191,6 +202,9 @@ func main() {
 		myConfig.Preamp,
 		myProcessor.CombinedGain,
 		elapsed))
+	// (SqueezeDSP fork) whether the upsampler's and the FIR's loops run in AVX2 (an amd64 engine built with
+	// GOEXPERIMENT=simd, on a CPU with AVX2): the bits are the same either way, so only this line says which ran
+	myLogger.Info(fmt.Sprintf("AVX2 loops: upsampler %t, FIR %t", foxUpsampler.AVX2(), foxConvolverPartition.AVX2()))
 
 	initTime := end.Sub(start).Seconds()
 	// Process audio
@@ -224,6 +238,18 @@ func main() {
 		peakDBFS,      // dBfs peak value
 		rawPeakDBFS,   // Input peak value
 	))
+	if d := myProcessor.Encoder.DSDEncoder; d != nil {
+		myLogger.Info(fmt.Sprintf("DSF out: peak %.4f of full swing, %d samples limited, %d modulator resets, %d samples on the safe design, %d held after the interpolator",
+			d.Peak, d.Limited, d.Resets, d.InSafe, d.Overshoot))
+	}
+	// (SqueezeDSP fork) each stage's own time, ms of work a second of audio
+	if st := myProcessor.StageTimes(); st != "" {
+		myLogger.Info("stage time per second of audio: " + st)
+	}
+	// (0.1.72.46) the engine's speed while it played: the runs of its lead (none on Windows, or for a stream too short)
+	if rs := myProcessor.RunsSpeed(); rs != "" {
+		myLogger.Info("speed while playing: " + rs)
+	}
 	// Close the output file after all processing is done
 	err = myProcessor.Encoder.Close()
 	if err != nil {
@@ -247,4 +273,15 @@ func main() {
 			log.Fatal("could not write memory profile: ", err)
 		}
 	*/
+}
+
+// bench: --bench's report, about ten seconds of one core: the machine, which loops run in AVX2, and each loop's time,
+// the old loop's beside the AVX2 one's where both run (the same bits either way).
+func bench(w io.Writer) {
+	fmt.Fprintf(w, "SqueezeDSP engine bench: %s %s/%s, %d CPUs, AVX2 loops: upsampler %t, FIR %t\n",
+		runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), foxUpsampler.AVX2(), foxConvolverPartition.AVX2())
+	const each = 900 * time.Millisecond
+	foxUpsampler.Bench(w, each)
+	foxConvolverPartition.Bench(w, each)
+	foxDSDEncoder.Bench(w, each)
 }

@@ -19,15 +19,20 @@ function InitialiseData()
     return {
         Bypass: 1,
         OutputFormat: "FLAC",   // or "PCM": 24-bit WAV with its header, for a player that reads one
-        Upsample: "off",        // or "on": soxr in ffmpeg, in float, before the DSP (Upsample.pm)
-        UpsamplePrecision: 28,  // soxr bits: 20, 24, 28, 33
-        UpsampleSteep: 0,       // 1: soxr's Chebyshev passband
-        UpsamplePassband: 0.99, // 0.80-0.995 of the track's Nyquist, a fixed target at most 0.95; 0: Auto, soxr's own
-        UpsamplePhase: "linear", // or "intermediate", "minimum": sox's rate, with headroom (Upsample.pm)
+        Upsample: "off",        // the Sample Rate Converter: "on" (PCM: the engine resamples before the DSP; Upsample.pm), or "dsd"
+        UpsamplePCMFilterCD: "short-int",    // PCM's filter for a source at 48 kHz and under: one of Upsample.pm's @FILTERS
+        UpsamplePCMFilterHiRes: "short-lin", // ... and for hi-res (Upsample::pcmFilters, the engine's --upfilter)
         UpsampleTarget: "family", // or "fixed": every track, DSD included, to the player's top rate
         UpsampleMax: 0,         // 0: the player's top rate; or 768000, 384000, 192000, 96000 below it
         DSDCutoff: 30000,       // a DSF on our engine (0.3.13): its low-pass, Hz; 24000, 30000, 50000, or 0 for none
         DSDGain: 0,             // ... and its gain, dB: 0 or 6 (DSD plays 6 dB under PCM)
+        UpsampleDSDRate: 2822400, // the Sample Rate Converter to DSD (Upsample "dsd"): 2822400, 5644800, 11289600, 22579200
+        UpsampleFilterCD: "short-int",    // ... its filter for a source at 48 kHz and under: one of Upsample.pm's @FILTERS
+        UpsampleFilterHiRes: "short-lin", // ... and for hi-res (Upsample::filters, the engine's --upfilter)
+        DSDOut: 0,              // 1: with the converter off, a DSF goes out as DSD at its own rate (Configuration::dsdOut)
+        DSDOutMod: "standard",  // DSD out's modulator: "standard", "clans" or "adaptive"
+        DSDOutDSP: 352800,      // ... and the DSP's rate before it: 352800 (DXD), 176400 for a slower server, or "native": a DSF's own DSD rate
+        DSDIntegrator: "lin",   // native: the integrator's shape, "lin", "int", "min" or "nonring"
         Preamp: 0,
         Balance: 0,
         Width: 0,
@@ -415,7 +420,7 @@ function SqueezeDSPFetchCurrentSettings(callback) {
             SqueezeDSPPlayer = {
                 dspOk: Number(data.result.dsp_ok) !== 0,
                 wavOk: Number(data.result.wav_ok) === 1,
-                // Upsample: available here (an ffmpeg with soxr, a known max), why not, the two targets
+                // Upsample: available here (the stream-start hook, a known max), why not, the two targets
                 upOk: Number(data.result.up_ok) === 1,
                 upWhy: data.result.up_why || '',
                 upTargets: data.result.up_targets || '',
@@ -423,12 +428,13 @@ function SqueezeDSPFetchCurrentSettings(callback) {
                 upFixed: data.result.up_fixed || '',
                 // the player's top rate with no max rate chosen: with FLAC out, with WAV out
                 upLimits: data.result.up_limits || '',
-                upFfmpeg: data.result.up_ffmpeg || '',
-                // the sox the intermediate and minimum phases need
-                upSox: data.result.up_sox || '',
                 // a reduced stream (MP3, OPS, OGG), and the Bitrate Limiting an MP3 is at (0: an app's 320 kbps)
                 outReduced: data.result.out_reduced || '',
-                outKbps: Number(data.result.out_kbps) || 0
+                outKbps: Number(data.result.out_kbps) || 0,
+                // native DSD out: a player that lists dsf itself, its output not a reduced stream (an older server: none)
+                dsdOutOk: Number(data.result.dsd_out_ok) === 1,
+                // the Sample Rate Converter to DSD: DSD out as above, and the stream-start hook (an older server: none)
+                upDsdOk: Number(data.result.up_dsd_ok) === 1
             };
 
             try {

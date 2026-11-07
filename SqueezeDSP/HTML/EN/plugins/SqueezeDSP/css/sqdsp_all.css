@@ -1475,10 +1475,6 @@ input[type="button"] {
 /* a choice whose buttons are all one width (Precision, Passband) */
 .filter-group.sqdsp-even .filter-type { min-width: 4.8em; justify-content: center; box-sizing: border-box; }
 
-/* a header's buttons and their note (Upsample's rates) on one line; the note wraps under them when short of room */
-.sqdsp-choice-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
-.sqdsp-choice-row .sqdsp-desc { margin-left: 0; flex: 0 1 auto; min-width: 0; }
-
 /* a setting's one-line description, beside its switch (wraps under it on a phone) */
 .sqdsp-desc { font-size: 12px; opacity: 0.85; line-height: 1.4; white-space: normal; margin-left: 6px; }
 .checkbox-row:has(.sqdsp-desc) { flex-wrap: wrap; width: auto; }
@@ -1521,8 +1517,7 @@ input[type="button"] {
   .table-container tr[style*="visibility"] { display: none; }
 
   /* a setting: its label on one line, the control (and its value box) under it */
-  .table-container tr .rowTitle,
-  .sqdsp-up .rowTitle { flex: 1 0 100%; width: auto; padding-top: 8px; }
+  .table-container tr .rowTitle { flex: 1 0 100%; width: auto; padding-top: 8px; }
   .table-container tr .rowBody,
   .table-container tr .Slide { flex: 1 1 0; width: auto !important; min-width: 0 !important; margin: 0; height: auto; }
   .table-container tr .rowSuffix { flex: 0 0 auto; width: auto; min-width: 0; max-width: none; }
@@ -1534,18 +1529,10 @@ input[type="button"] {
   .table-container tr.row-header .rowBody,
   #peqContainer .table-container tr:first-child .rowBody { flex: 1 1 0; min-width: 0 !important; }
 
-  /* Upsample's note goes under its buttons; the title stays level with the buttons, not mid-height */
-  .sqdsp-choice-row .sqdsp-desc { flex: 1 0 100%; }
-  .table-container tr#hdr_upsample { align-items: flex-start; }
-  .table-container tr#hdr_upsample .rowTitle { padding-top: 10px; }
-  /* Precision and Passband: one row, the buttons sharing it in equal widths */
+  /* a row of choice buttons (Precision, Passband, the DSD rates...): one row, the buttons sharing it in equal widths */
   .filter-group.sqdsp-even { flex-wrap: nowrap; gap: 4px; width: 100%; }
   .filter-group.sqdsp-even .filter-type-container { flex: 1 1 0; min-width: 0; }
   .filter-group.sqdsp-even .filter-type { width: 100%; min-width: 0; padding: 5px 2px; }
-
-  /* Output's two buttons don't fit beside its title at Material's font size: they take the next line */
-  .table-container tr#hdr_output { flex-wrap: wrap; }
-  .table-container tr#hdr_output .rowBody { flex: 1 0 100%; padding: 2px 6px 6px; }
 
   /* a sub-setting's label (Spotify gain) on its own line like the rest */
   .table-container tr .rowSubTitle { flex: 1 0 100%; width: auto; text-align: left; padding-left: 10px; }
@@ -1572,4 +1559,27 @@ input[type="button"] {
   .filter-type-container .tooltiptext { display: none; max-width: calc(100vw - 48px); box-sizing: border-box; }
   .tooltip:hover .tooltiptext,
   .filter-type-container:hover .tooltiptext { display: block; }
+}
+
+/* The tabs (Simon 2026-11-03, the SqueezeDSP page's): the page's own choice buttons in one row that wraps, one pane
+   shown; a group inside a pane (Resampler; Decoder, Encoder); a choice the converter overrides while it is on (dimmed,
+   its note still readable); what the DSP drives while the DSP is off (dimmed, still editable) */
+.filter-group.sqdsp-tabs { flex-wrap: wrap; row-gap: 6px; }
+.filter-group.sqdsp-tabs .filter-type { min-width: 4.8em; justify-content: center; box-sizing: border-box; }
+@media (max-width: 560px) {
+  /* on a phone in even columns; three, not the SqueezeDSP page's four: Material sets every font here to its own size
+     (!important), at which Convolution does not fit a quarter of a phone */
+  .filter-group.sqdsp-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 4px; width: 100%; }
+  .filter-group.sqdsp-tabs .filter-type-container { min-width: 0; }
+  .filter-group.sqdsp-tabs .filter-type { width: 100%; min-width: 0; padding: 5px 2px; white-space: nowrap; }
+}
+.sqdsp-grp { opacity: 0.65; font-size: 0.85em; }
+tr.sqdsp-group td { padding-top: 10px; padding-bottom: 2px; }
+tr.sqdsp-overridden > td.rowTitle, tr.sqdsp-overridden > td.rowBody { opacity: 0.55; }
+.sqdsp-pane.sqdsp-dimmed > *:not(.sqdsp-dspoff):not(.section-body-table) { opacity: 0.6; }
+.sqdsp-pane.sqdsp-dimmed > .section-body-table:not(.sqdsp-dspoff) tr:not(.sqdsp-dspoff) { opacity: 0.6; }
+/* a choice this player cannot take (the reason on its title): faded and inert, as on the SqueezeDSP page */
+.filter-group .filter-type:has(input[type="radio"]:disabled) { opacity: 0.4; cursor: default; }
+.filter-group .filter-type:has(input[type="radio"]:disabled:not(:checked)):hover {
+  background: lightsteelblue; color: black; border-color: RoyalBlue; transform: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }

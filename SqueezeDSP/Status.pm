@@ -11,14 +11,28 @@ package Plugins::SqueezeDSP::Status;
 # pipeline in the background and exits, and init takes the stages over. They are out of LMS's
 # tree but still in its session, and their order is in their pipes (rig 2026-10-25, the Lounge).
 #
-# PROCESSING SPEED is the audio a stage has processed per second of CPU it has used: x30 means one
-# second of music costs it 1/30 s of one core, so the pipeline could run thirty times faster than
-# it plays. The pipeline's speed is its slowest stage's. The engine's own "x realtime" line is no
-# use here: it is written at a track's end and divides by wall time, and while the player's buffer
-# holds the pipeline back that reads 1.007x (bench 2026-10-24). Audio processed is counted from the
-# bytes that crossed the engine's output pipe (the stage after it reads exactly those), so it is
-# the same for every stage; CPU is /proc's utime + stime. Both are counted from each stage's start,
-# so the figure settles over a track. Linux only: elsewhere there is no /proc and the page says so.
+# REAL TIME SPEED is how many times faster than real time the engine runs flat out, as the engine itself measures and
+# reports it (LyrionDSPProcessAudio reportSpeed, read by _engineSpeed): one figure on every platform. At a stream's
+# start its FILL (foxSpeed.Fill, 0.1.72.35): the audio written while the player's buffer filled and LMS took
+# everything, over the time taken, its waits for the player left out. Since 0.1.72.46 also while it plays (Simon
+# 2026-11-06: "a user needs to see the limits of their machine"): the engine keeps up to 3 s of its output ahead of LMS
+# and refills it in runs, flat out, each timed where the audio enters it (foxSpeed.Runs), the figure the runs of the
+# last 10 s; so a heavier track or a busier server shows within a run or two (ledger THE SPEED SHOWN IS ONE START'S
+# FILL). Not on Windows, where LMS's socketwrapper ends a pipeline's processes 2 s after its first one: there the fill
+# alone, and a gapless change, whose engine never runs flat out, keeps the player's last fill (%fill); elsewhere that
+# bridges only the second before its own. Nothing measured from outside the engine is its speed: CPU understates an
+# engine that spreads its stages over cores (on the M3 at DSD512 it ran 4.1x real time where its CPU read 1.8x), and the
+# output's timing and each stage's own time overstate it (ledger THE PAGE'S SPEED WAS PER CPU-SECOND). The engine also
+# names its busiest stage by its own work, the one to speed up.
+#
+# STAGES: what each process of the pipeline costs, its CPU per second of the audio processed. Audio processed is
+# counted from the bytes that crossed the engine's output pipe (the stage after it reads exactly those), so it is the
+# same for every stage; CPU is /proc's utime + stime, both counted from each stage's start, so the figures settle over
+# a track. Never CPU over wall time, which counts the buffer filling at a track's start (measure). The page shows each
+# stage's as a share of the whole CPU, its every core (cores, /proc/stat: Simon 2026-11-05, "it needs to be overall
+# cpu performance"). Not a speed (0.1.72.46: the status names none; a stage's audio per CPU-second read as one was
+# how 1.6x got quoted against the page's 3.7x). Linux only (/proc); elsewhere the engine's own report alone
+# (_reportOnly).
 #
 # A pipeline lives while LMS STREAMS its track, not while the player plays it. Once the whole track
 # is with the player (the FiiO buffers 15-20 s of 384k) its pipeline exits, and the next track's
@@ -31,7 +45,9 @@ package Plugins::SqueezeDSP::Status;
 # replaces it at the next open, a stop or a paused stream's close.
 use strict;
 use warnings;
-use List::Util qw(max min);
+use File::Spec;
+use JSON::XS ();
+use List::Util qw(max);
 use Scalar::Util qw(refaddr weaken);
 
 # tests point these at a fixture tree and at a made-up LMS pid
@@ -47,12 +63,24 @@ my %cache;
 # measurement }
 my %last;
 
+# client id -> { speed => the engine's last fill figure, track => the title of the track it was measured at }: shown
+# for a pipeline that has none of its own, as a gapless change's never runs flat out (report)
+my %fill;
+
 sub clk_tck {
     return $TICKS //= ( eval { require POSIX; POSIX::sysconf( POSIX::_SC_CLK_TCK() ) } || 100 );
 }
 
 # Whether this server can be read at all (a /proc with an uptime)
 sub available { return ( -d $PROC && -r "$PROC/uptime" ) ? 1 : 0 }
+
+# The server's CPUs, as a CPU monitor counts them (htop's bars): /proc/stat's cpu0, cpu1, ... lines, not the
+# total "cpu" line; undef when it cannot be read
+sub cores {
+    my $s = _slurp("$PROC/stat") // return undef;
+    my $n = () = $s =~ /^cpu\d+\s/mg;
+    return $n || undef;
+}
 
 sub _slurp {
     my $f = shift;
@@ -226,7 +254,7 @@ sub pipelinePids {
 }
 
 # a player's remembered engine and measurement dropped (the tests start each case clean)
-sub forget { delete $cache{ $_[0] }; delete $last{ $_[0] } }
+sub forget { delete $cache{ $_[0] }; delete $last{ $_[0] }; delete $fill{ $_[0] } }
 
 # What a stage is, from its command line
 sub _role {
@@ -283,8 +311,12 @@ sub _resampler {
         # settings unless its command line gives them (report fills them in: _dsdSettings)
         if ( $s->{role} eq 'dsp' ) {
             my $a = _engineArgs( $s->{argv} );
-            if ( uc( $a->{formatin} // '' ) eq 'DSD' && ( $a->{samplerate} // '' ) =~ /^\d+$/ ) {
-                return { tool => 'decoder', phase => 'linear', target => 0 + $a->{samplerate}, dsd => 1,
+            if ( uc( $a->{formatin} // '' ) eq 'DSD' && ( $a->{samplerate} // '' ) =~ /^(?:\d+|native)$/i ) {
+                # native (the native round): no rate change, the DSP at the source's DSD rate (measure sets the target);
+                # its integrator is the player's (report fills it in: _dsdSettings)
+                my $native = $a->{samplerate} !~ /^\d+$/;
+                return { tool => 'decoder', phase => 'linear', dsd => 1,
+                         ( $native ? ( native => 1 ) : ( target => 0 + $a->{samplerate} ) ),
                          ( ( $a->{dsdcutoff} // '' ) =~ /^\d+(?:\.\d+)?$/ ? ( cutoff => 0 + $a->{dsdcutoff} ) : () ),
                          ( ( $a->{dsdgain} // '' ) =~ /^-?\d+(?:\.\d+)?$/ ? ( gain => 0 + $a->{dsdgain} ) : () ) };
             }
@@ -315,13 +347,37 @@ sub _resampler {
     return undef;
 }
 
+# The converter to DSD (0.3.19): the engine upsamples a PCM input itself (--upsample), by the player's filters
+# (--upfilter: one for a source at 48 kHz and under, then one for hi-res, the source's rate saying which ran; one value
+# serves both, as the engine reads it; none or one it refuses, its defaults). Nothing ran for a source already there.
+# The filter that ran, as the page names it: its family (kaiser, gauss, halfband, slow, nonring), length (Kaiser's and
+# Gaussian's) and phase (none for Non-ringing). Going down a leaky family runs as Kaiser short in its phase, as the
+# engine does it (foxUpsampler New).
+my $FILTER = qr/(?:(?:short|long|xlong|gauss-(?:short|medium|long)|halfband|slow)-(?:lin|int|min)|nonring)/;
+sub _engineUp {
+    my ( $a, $rate ) = @_;
+    return undef unless ( $a->{upsample} // '' ) =~ /^\d+$/ && uc( $a->{formatin} // '' ) ne 'DSD';
+    return undef if defined $rate && $rate == $a->{upsample};
+    my @f = map { lc } split /,/, ( $a->{upfilter} // '' ), -1;
+    @f = ( $f[0] ) x 2 if @f == 1;
+    @f = ( 'short-int', 'short-lin' ) unless @f == 2 && !grep { !/^$FILTER$/ } @f;
+    my $f = ( defined $rate && $rate > 48000 ) ? $f[1] : $f[0];
+    $f = 'short-' . ( $f =~ /-(lin|int|min)$/ ? $1 : 'lin' ) if defined $rate && $rate > $a->{upsample} && $f =~ /^(?:halfband|slow|nonring)\b/;
+    my ( $fam, $len, $ph ) = $f eq 'nonring' ? ( 'nonring', undef, undef )
+                           : $f =~ /^(gauss|halfband|slow)-(?:(short|medium|long)-)?(lin|int|min)$/ ? ( $1, $2, $3 )
+                           : $f =~ /^(short|long|xlong)-(lin|int|min)$/ ? ( 'kaiser', $1, $2 ) : ();
+    return { tool => 'engine', target => 0 + $a->{upsample}, filter => $f, family => $fam, len => $len,
+             phase => defined $ph ? { lin => 'linear', int => 'intermediate', min => 'minimum' }->{$ph} : undef };
+}
+
 # The output stage: LMS's flac, or the engine writing WAV itself (PCM mode), or sox writing WAV or
 # FLAC at its own rate (a D rule), or a reduced stream's encoder (reduced => 1): MP3 and Opus at a
 # bitrate, at the rate their encoder picks (Opus always 48k), Ogg Vorbis at a quality, at the
 # engine's rate or sox's on D. PCM mode's length filter after it changes no format, so `measure`
-# hands this the last stage before the filter.
+# hands this the last stage before the filter. Native DSD out: the engine writing a DSF stream
+# itself, at the DSD rate and with the modulator it took ($dsf: _dsdOut).
 sub _output {
-    my ( $last, $engineArgs ) = @_;
+    my ( $last, $engineArgs, $dsf ) = @_;
     my $rate = $engineArgs->{samplerate};
     my $args = join( ' ', @{ $last->{argv} || [] } );
     if ( $last->{role} eq 'mp3-enc' ) {
@@ -342,19 +398,24 @@ sub _output {
         my ($down) = $args =~ / rate -v (\d+)\s*$/;
         return { format => ( $args =~ / -t flac / ? 'FLAC' : 'WAV' ), bits => 24, rate => $down ? 0 + $down : $rate };
     }
+    return { format => 'DSF', dsd => ( $dsf || {} )->{rate}, mod => ( $dsf || {} )->{mod} }
+        if $last->{role} eq 'dsp' && uc( $engineArgs->{formatout} // '' ) eq 'DSF';
     return { format => ( ( $engineArgs->{formatout} // '' ) eq 'FLC' ? 'FLAC' : 'WAV' ), bits => $engineArgs->{bitsout} // 24, rate => $rate }
         if $last->{role} eq 'dsp';
     return undef;
 }
 
-# The running pipeline of one player, measured: its stages (role, CPU, speed), what it was told
-# to do, and the audio it has processed. $fallbackRate is LMS's view of the track, for the one
-# route whose engine command carries no rate (the engine reading a WAV or AIFF file itself).
+# The running pipeline of one player, measured: its stages (role, CPU), the engine's own speed, what it was
+# told to do, and the audio it has processed (with no /proc: the engine's report alone, _reportOnly).
+# $fallbackRate is LMS's view of the track, for the one
+# route whose engine command carries no rate (the engine reading a WAV or AIFF file itself), and
+# for native DSD out the source's DSD rate, which $dsdOut (report's _dsdOut) turns into the DSD
+# rate and modulator the engine takes from the player's settings.
 sub measure {
-    my ( $id, $fallbackRate, $streaming ) = @_;
-    return { running => 0, speed_ok => 0 } unless available();
+    my ( $id, $fallbackRate, $streaming, $dsdOut ) = @_;
+    return _reportOnly($id) unless available();
     my @pids = pipelinePids( $id, $streaming );
-    return { running => 0, speed_ok => 1 } unless @pids;
+    return { running => 0 } unless @pids;
 
     my $tck = clk_tck();
     my ( @stages, $engineIdx );
@@ -367,19 +428,24 @@ sub measure {
         push @stages, { pid => $pid, argv => \@argv, role => _role( \@argv, $isEngine ), cpu => $st->{cpu} / $tck,
                         start => $st->{start} / $tck, io => _io($pid) };
     }
-    return { running => 0, speed_ok => 1 } unless defined $engineIdx;
+    return { running => 0 } unless defined $engineIdx;
 
     my $e = $stages[$engineIdx];
     my $a = _engineArgs( $e->{argv} );
-    my $rate = $a->{samplerate} // $fallbackRate;
+    # native DSD (--samplerate=native, the native round): the DSP at the source's DSD rate, LMS's view of the track
+    my $native = lc( $a->{samplerate} // '' ) eq 'native';
+    my $rate = $native ? $fallbackRate : $a->{samplerate} // $fallbackRate;
     my $ch = $a->{channels} // 2;
+    # the rate the DSP runs at: the converter's (--upsample: the engine upsamples itself, 0.3.19), else the input's
+    my $dspRate = ( $a->{upsample} // '' ) =~ /^\d+$/ && uc( $a->{formatin} // '' ) ne 'DSD' ? 0 + $a->{upsample} : $rate;
 
     # the audio that crossed the engine's output pipe: the stage after it read exactly those bytes
-    # (the engine's own count also holds its log writes); a WAV output is 24-bit at the engine's rate
+    # (the engine's own count also holds its log writes); a WAV output is 24-bit at the rate the engine writes, the
+    # DSP's: with --upsample (Upsample's PCM since 0.1.72.37) not the input's --samplerate
     my $audio;
     my $outWav = ( $a->{formatout} // 'WAV' ) eq 'WAV';
-    if ( $outWav && $rate && $ch ) {
-        my $bps = $rate * $ch * ( ( $a->{bitsout} // 24 ) / 8 );
+    if ( $outWav && $dspRate && $ch ) {
+        my $bps = $dspRate * $ch * ( ( $a->{bitsout} // 24 ) / 8 );
         my $next = $stages[ $engineIdx + 1 ];
         my $bytes = $next ? $next->{io}{rchar} : $e->{io}{wchar};
         $audio = max( 0, ( $bytes // 0 ) - 44 ) / $bps if defined $bytes;
@@ -389,32 +455,100 @@ sub measure {
         my $bytes = $stages[ $engineIdx - 1 ]{io}{wchar};
         $audio = $bytes / ( $rate * $ch * ( $a->{bitsin} / 8 ) ) if defined $bytes;
     }
+    # native DSD out (TemplateConfig template_DSF): the engine is the last stage and writes the DSF itself, its header
+    # (92 bytes) then one bit per channel per sample at the DSD rate out, so its own count is the audio (as PCM mode's)
+    my $dsf;
+    if ( uc( $a->{formatout} // '' ) eq 'DSF' ) {
+        $dsf = ref $dsdOut eq 'CODE' ? $dsdOut->( $fallbackRate, $a ) : undef;
+        my $bytes = $e->{io}{wchar};
+        $audio = max( 0, $bytes - 92 ) / ( $dsf->{rate} * $ch / 8 )
+            if $dsf && $dsf->{rate} && $ch && defined $bytes && $engineIdx == $#stages;
+    }
 
-    my $uptime = ( split ' ', _slurp("$PROC/uptime") // '0' )[0] || 0;
-    my $wall = $uptime - min( map { $_->{start} } @stages );
+    # the CPU figure is the cost at real time: every stage's CPU per second of the audio processed, as a share of one
+    # core (the stages added up, which a CPU monitor shows spread over cores). Not over wall time: at a track's start
+    # the pipeline runs flat out until the player's buffer is full (ManCave 2026-11-03: 134 s of audio in its first
+    # 34 s), so CPU over wall time read 81-89% there where playing costs 21%, and a pipeline that ends once the whole
+    # track is with the player never settles to it (Simon: "it was saying 89% of one cpu core in our signal path").
+    # The page no longer shows this total (0.1.72.38): its Stages row gives each stage's cost as a share of the whole
+    # CPU, every core (cores)
     my $cpuAll = 0;
     $cpuAll += $_->{cpu} for @stages;
 
-    my ( $slow, @out );
-    for my $s (@stages) {
-        my $speed = ( defined $audio && $audio > 0 && $s->{cpu} > 0 ) ? $audio / $s->{cpu} : undef;
-        $slow = $s if defined $speed && ( !$slow || $speed < $slow->{speed} );
-        $s->{speed} = $speed;
-        push @out, { role => $s->{role}, cpu => sprintf( '%.2f', $s->{cpu} ) + 0, speed => defined $speed ? sprintf( '%.1f', $speed ) + 0 : undef };
-    }
+    my $es = _engineSpeed( $id, $e->{pid} ) || {};
+    my @out = map { { role => $_->{role}, cpu => sprintf( '%.2f', $_->{cpu} ) + 0 } } @stages;
+    my $res = _resampler(@stages) // _engineUp( $a, $rate );
+    $res->{target} = $rate if $res && $res->{native} && defined $rate && $rate =~ /^\d+$/;
 
     return {
         running   => 1,
-        speed_ok  => 1,
         audio     => defined $audio ? sprintf( '%.1f', $audio ) + 0 : undef,
-        speed     => $slow ? sprintf( '%.1f', $slow->{speed} ) + 0 : undef,
-        slowest   => $slow ? $slow->{role} : undef,
-        cpu       => $wall > 0 ? sprintf( '%.1f', 100 * $cpuAll / $wall ) + 0 : undef,
+        cpu       => ( defined $audio && $audio > 0 ) ? sprintf( '%.1f', 100 * $cpuAll / $audio ) + 0 : undef,
+        cores     => cores(),
+        realtime  => $es->{speed},
+        busiest   => $es->{stage},
+        stage_ms  => $es->{stages},
         stages    => \@out,
-        resampler => _resampler(@stages),
-        dsp       => { rate => $rate, bitsin => $a->{bitsin}, float => ( ( $a->{bitsin} // 0 ) == 32 ? 1 : 0 ) },
-        output    => _output( ( grep { $_->{role} ne 'wavlength' } @stages )[-1], { %$a, samplerate => $rate } ),
+        resampler => $res,
+        dsp       => { rate => $dspRate, bitsin => $a->{bitsin}, float => ( ( $a->{bitsin} // 0 ) == 32 ? 1 : 0 ) },
+        output    => _output( ( grep { $_->{role} ne 'wavlength' } @stages )[-1], { %$a, samplerate => $dspRate }, $dsf ),
     };
+}
+
+# _speedReport: the engine's report for a player (LyrionDSPProcessAudio reportSpeed), the file it writes in the
+# plugin's temp folder under its player's id, cleaned as the engine cleans it (sanitizeClientID), from its start and
+# every second while it runs: ( the report, its age in seconds ), or nothing.
+sub _speedReport {
+    my ($id) = @_;
+    my $dir = $Plugins::SqueezeDSP::Plugin::pluginTempDataDir;
+    return unless defined $dir && length $dir;
+    ( my $clean = $id ) =~ tr/:-/__/;
+    my $file = File::Spec->catfile( $dir, "speed_$clean.json" );
+    my $raw = _slurp($file);
+    return unless defined $raw;
+    my $j = eval { JSON::XS::decode_json($raw) };
+    return unless ref $j eq 'HASH';
+    my $mtime = ( stat $file )[9];
+    return ( $j, defined $mtime ? time - $mtime : undef );
+}
+
+# _engineSpeed: the engine's own speed from its report, only the engine measured's (its pid, so never a run before it):
+# _figures, or undef.
+sub _engineSpeed {
+    my ( $id, $pid ) = @_;
+    return undef unless defined $pid;
+    my ($j) = _speedReport($id);
+    return undef unless $j && ( $j->{pid} // 0 ) == $pid;
+    return _figures($j);
+}
+
+# _figures: { speed => the report's audio over its time once that holds two seconds of audio (the runs' while it plays,
+# else the fill's: the engine picks), stage => its busiest stage, "convolver 2" as "convolver", stages => each stage's
+# own time }, any undef; undef with none (an engine that encodes FLAC itself measures nothing).
+sub _figures {
+    my ($j) = @_;
+    my $speed = ( ( $j->{busy} // 0 ) > 0 && ( $j->{audio} // 0 ) >= 2 ) ? sprintf( '%.1f', $j->{audio} / $j->{busy} ) + 0 : undef;
+    my $stage = ( defined $j->{stage} && !ref $j->{stage} && $j->{stage} =~ /^([a-z]+)/ ) ? $1 : undef;
+    # (0.1.72.46) each stage's own time, ms of work a second of audio, the route's order (the engine's stages): for a
+    # live test to read one stage alone (ledger THE AVX2 LOOPS); the page shows none of it
+    my @ms = map { { name => $_->{name}, ms => $_->{ms} + 0 } }
+      grep { ref $_ eq 'HASH' && defined $_->{name} && !ref $_->{name} && defined $_->{ms} && !ref $_->{ms} && $_->{ms} =~ /^\d+(?:\.\d+)?$/ }
+      ( ref $j->{stages} eq 'ARRAY' ? @{ $j->{stages} } : () );
+    return ( defined $speed || defined $stage || @ms ) ? { speed => $speed, stage => $stage, stages => ( @ms ? \@ms : undef ) } : undef;
+}
+
+# _reportOnly (0.1.72.46): a server with no /proc (macOS, Windows) cannot see the pipeline, so the engine's own report
+# alone, while it is fresh: no older than $FRESH seconds (the engine rewrites it every second from its start; its pid
+# cannot be checked here). Its speed and busiest stage; no stages, so the page draws no signal path rows (what each
+# stage costs, the resampler, the output: /proc's).
+our $FRESH = 3;
+
+sub _reportOnly {
+    my ($id) = @_;
+    my ( $j, $age ) = _speedReport($id);
+    return { running => 0 } unless $j && defined $age && $age <= $FRESH;
+    my $f = _figures($j) || {};
+    return { running => 1, realtime => $f->{speed}, busiest => $f->{stage}, stage_ms => $f->{stages} };
 }
 
 # What LMS is playing on this player, through its own status query, so a streamed track's title
@@ -496,15 +630,23 @@ sub report {
     }
 
     # whether LMS holds a stream for the player: only its controller can say (every LMS client has one, Client.pm:312)
-    my $m = measure( $id, ( $next || $now )->{rate}, ref $controller ? ( ref $stream ? 1 : 0 ) : undef );
+    my $m = measure( $id, ( $next || $now )->{rate}, ref $controller ? ( ref $stream ? 1 : 0 ) : undef, sub { _dsdOut( $client, @_ ) } );
     _dsdSettings( $client, $m->{resampler} ) if ( ( $m->{resampler} || {} )->{tool} // '' ) eq 'decoder';
     $m->{bypassed} = 1 if $m->{running} && eval { _bypassed( $client, $m ) };
     if ( $m->{running} ) {
+        # the engine's fill, or the player's last one, named by its track (a gapless change never runs flat out)
+        if ( defined $m->{realtime} ) {
+            $fill{$id} = { speed => $m->{realtime}, track => ( $next || $now )->{title} };
+        }
+        elsif ( my $f = $fill{$id} ) {
+            $m->{realtime}      = $f->{speed};
+            $m->{realtime_from} = $f->{track} // '';
+        }
         $last{$id} = { stream => $stream, m => {%$m} };
         weaken( $last{$id}{stream} ) if ref $stream;
         $m->{next} = $next if $next;
     }
-    elsif ( $m->{speed_ok} && ref $playing && $now->{mode} ne 'stop' && _sent( $controller, $playing, $streaming ) ) {
+    elsif ( ref $playing && $now->{mode} ne 'stop' && _sent( $controller, $playing, $streaming ) ) {
         # no pipeline, a track playing or paused (a stopped player keeps its last song) whose stream
         # LMS has read to its end: if that stream went through us, the whole track is with the player.
         # Its figures only while LMS still holds the very stream they were taken from.
@@ -555,7 +697,36 @@ sub _dsdSettings {
         my $g = $num->( $p->{DSDGain} );
         $r->{gain} = ( defined $g && $g >= -24 && $g <= 12 ) ? $g : 0;
     }
+    # native: the integrator the engine runs, the player's DSDIntegrator (lin, int, min or nonring, quotes and spaces
+    # trimmed, any case), else lin; its phase as the converter's filters name theirs (non-ringing is linear: symmetric)
+    if ( $r->{native} ) {
+        my $i = lc( ( $p->{DSDIntegrator} // '' ) =~ s/^[ "]+|[ "]+$//gr );
+        $r->{integrator} = $i =~ /^(?:lin|int|min|nonring)$/ ? $i : 'lin';
+        $r->{phase} = { int => 'intermediate', min => 'minimum' }->{ $r->{integrator} } // 'linear';
+    }
     return $r;
+}
+
+# DSF out as the engine takes it at each track (LyrionDSPProcessAudio, DSF out): the rate its --dsdrate (a DSD rate,
+# or source), else the player's DSDOutRate (one of the four DSD rates, a number or its string), else the source's own
+# (LMS records a DSF's rate as its DSD rate); then capped by its --dsdmax, else the player's DSDOutMax (one of the
+# four). Our rules give both flags (TemplateConfig template_DSF: source, DSD512; template_DSFUP: the converter's rate
+# twice). The modulator: DSDOutMod (standard, clans or adaptive, quotes and spaces trimmed, any case), else standard
+# (LyrionDSPSettings buildConfig). $args: the engine's arguments.
+my %DSD_RATES = map { $_ => 1 } ( 2822400, 5644800, 11289600, 22579200 );
+sub _dsdOut {
+    my ( $client, $srcRate, $args ) = @_;
+    $args ||= {};
+    my $p = eval { Plugins::SqueezeDSP::Configuration::clientPrefs($client) } || {};
+    my $num = sub { my $v = shift; ( defined $v && $v =~ /^\s*(\d+)(?:\.0*)?\s*$/ ) ? 0 + $1 : undef };
+    my $flag = $args->{dsdrate};
+    my $r = ( defined $flag && lc $flag eq 'source' ) ? undef : $num->( defined $flag ? $flag : $p->{DSDOutRate} );
+    my $rate = ( defined $r && $DSD_RATES{$r} ) ? $r : $num->($srcRate);
+    my $max = $num->( defined $args->{dsdmax} ? $args->{dsdmax} : $p->{DSDOutMax} );
+    $rate = $max if defined $rate && defined $max && $DSD_RATES{$max} && $rate > $max;
+    my $mod = lc( ( $p->{DSDOutMod} // '' ) =~ s/^[ "]+|[ "]+$//gr );
+    $mod = 'standard' unless $mod =~ /^(?:standard|clans|adaptive)$/;
+    return { rate => $rate, mod => $mod };
 }
 
 # squeezedsp.status: the page polls it, one request at a time, while it is open

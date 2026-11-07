@@ -53,6 +53,9 @@ type AudioDecoder struct {
 	EndTime   time.Duration // where the decode ends, from the file's start; 0 = to the end
 	DSDCutoff float64       // Hz; 0 = none
 	DSDGain   float64       // dB
+	// the native DSD round: decoded at its own DSD rate (SampleRate becomes it) through DSDIntegrator's shape
+	DSDNative     bool
+	DSDIntegrator string
 }
 
 // NewDecoder creates a new decoder with implicit file opening or Stdin setup
@@ -242,6 +245,8 @@ func (myDecoder *AudioDecoder) initDSD() error {
 		OutRate:         myDecoder.SampleRate,
 		Cutoff:          myDecoder.DSDCutoff,
 		GainDB:          myDecoder.DSDGain,
+		Native:          myDecoder.DSDNative,
+		Integrator:      myDecoder.DSDIntegrator,
 		StartTime:       myDecoder.StartTime,
 		EndTime:         myDecoder.EndTime,
 		TargetFrameSize: myDecoder.TargetFrameSize,
@@ -253,6 +258,7 @@ func (myDecoder *AudioDecoder) initDSD() error {
 	}
 	myDecoder.DSDReader = r
 	myDecoder.NumChannels = r.NumChannels
+	myDecoder.SampleRate = r.OutRate // native: the DSD rate the decode stays at; else as asked
 	myDecoder.BitDepth = 24
 	myDecoder.Size = r.Size()
 	if myDecoder.TargetFrameSize == 0 {

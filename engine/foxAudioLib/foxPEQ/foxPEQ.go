@@ -189,7 +189,9 @@ func (PEQ *PEQFilter) CalcBiquadFilter(filterType string, frequency, peakGain, w
 
 		return fmt.Errorf(errorPrefix+" %s frequency should be between 10 and 25000, got: %v ", filterType, frequency)
 	}
-	if PEQ.SampleRate < 10000 || PEQ.SampleRate > 800000 {
+	// SqueezeDSP fork (native DSD, 0.1.72.48): a DSF's DSP runs at its own DSD rate, a multiple of 2822400 Hz, and the
+	// PEQ with it; above 800 kHz Fox's check dropped every filter there (live 0.1.72.47, a high shelf on DSD64)
+	if PEQ.SampleRate < 10000 || (PEQ.SampleRate > 800000 && PEQ.SampleRate%2822400 != 0) {
 		return fmt.Errorf(errorPrefix+" %s sampleRate should be a recognized sample rate, got: %d ", filterType, PEQ.SampleRate)
 	}
 	if peakGain < -30 || peakGain > 20 {

@@ -63,7 +63,6 @@ h1 { font-size: clamp(17px, 1.4vw, 22px); margin: 0; font-weight: 600; }
 .speed-k { color: var(--dim); font-size: 0.9em; }
 .speed-v { font-size: clamp(26px, 3.2vw, 38px); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--accent); }
 .speed-v.none { color: var(--dim); font-size: 1.2em; font-weight: 400; }
-.speed-s { color: var(--dim); font-size: 0.88em; }
 .note { color: var(--dim); font-size: 0.88em; margin: 4px 0; }
 .note:empty { display: none; }
 .rows { border-top: 1px solid var(--line); }
@@ -116,6 +115,7 @@ html.lt .seg button[aria-checked="true"] { color: #fff; }
 select, input[type="text"] { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line);
                              border-radius: 4px; padding: 5px 8px; min-width: 0; }
 .presets .c select { flex: 1 1 140px; }
+.c select.filter { flex: 1 1 220px; max-width: 100%; }
 .presets .c input { flex: 1 1 140px; }
 
 .more { color: var(--dim); font-size: 0.9em; padding: 4px 2px 12px; }
@@ -129,3 +129,36 @@ select, input[type="text"] { font: inherit; color: var(--fg); background: var(--
   .ctl.sw-row > .c { flex: 0 0 auto; }
   .row .k { flex-basis: 84px; }
 }
+
+/* the settings' tabs (Simon 2026-11-03): one row on a wide screen, two rows of four on a phone; one card shown */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 4px 0 12px; }
+.tab { flex: 0 0 auto; padding: 9px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent;
+       color: var(--dim); font: inherit; font-size: 0.92em; cursor: pointer; white-space: nowrap; text-align: center; }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tabpane { display: none; }
+.tabpane.on { display: block; }
+.tabpane > h2 + .note:empty + .ctl { border-top: 0; }
+@media (max-width: 560px) {
+  .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 2px; }
+  .tab { padding: 9px 2px; }
+}
+/* a group inside a card (Resampler; Decoder, Encoder) */
+.grp { color: var(--dim); font-size: 0.82em; margin: 14px 0 2px; }
+.grp + .ctl { border-top: 0; }
+/* a choice the converter overrides while it is on: dimmed, its note still readable */
+.ctl.overridden > .k, .ctl.overridden > .c { opacity: 0.55; }
+.note.classic a { color: var(--accent); }
+
+/* the clipping row: the last track's peak and a dot per track, coloured as the classic page's peak bars */
+.clip { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pk { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+.pk.ok { background: var(--ok); }
+.pk.high { background: #ffb74d; }
+.pk.clip { background: #ef5350; }
+.pk.bitlow { background: rgba(255,255,255,0.55); }
+.pk.low { background: rgba(255,255,255,0.3); }
+html.lt .pk.bitlow { background: rgba(0,0,0,0.4); }
+html.lt .pk.low { background: rgba(0,0,0,0.22); }
+.pkhist { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; }
+.pkhist .pk { width: 8px; height: 8px; }

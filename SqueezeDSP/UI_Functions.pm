@@ -51,6 +51,8 @@ sub logsummaryQuery {
     my $trackcount = 0;
     my @reportlines;
     my @startvalues;
+    my $heldFor;    # (SqueezeDSP fork) the row the next DSF out line belongs to: its own peak line's, if it made one
+    my $heldNext;   # (SqueezeDSP fork) a stream cut short says what it held BEFORE its peak line: for that line's row
 
     Plugins::SqueezeDSP::Utils::debug("Opening log file " . $Plugins::SqueezeDSP::Plugin::logfile . " for " . $clientID);
     if (! -e $Plugins::SqueezeDSP::Plugin::logfile) {
@@ -66,9 +68,25 @@ sub logsummaryQuery {
         chomp($line);
         if (index($line, '=>') != -1 && index($line, $clientID) != -1) {
             $startline = $line;
+            $heldNext = undef;
+        }
+        if (index($line, 'DSF out (cut short):') != -1 && index($line, $clientID) != -1) {
+            ($heldNext) = $line =~ /(\d+) samples limited/;
+            next;
+        }
+        # (SqueezeDSP fork, 0.1.72.46) DSF out's own line, straight after its track's peak line: the samples it held at
+        # the limit, before the interpolator and after it. The pages call a DSD track clipped only when it held one:
+        # its peak is against DSD's full swing, so 0 dB there is no clip point
+        if (index($line, 'DSF out:') != -1 && index($line, $clientID) != -1) {
+            my ($limited) = $line =~ /(\d+) samples limited/;
+            my ($after)   = $line =~ /(\d+) held after the interpolator/;
+            $heldFor->{held} = $limited + ( $after // 0 ) if $heldFor && defined $limited;
+            $heldFor = undef;
+            next;
         }
         if (index($line, 'peak') != -1 && index($line, $clientID) != -1) {
             my @endvalues = split(' ', $line);
+            $heldFor = undef;
             if ($endvalues[3] != 0) {
                 @startvalues = split(' ', $startline);
                 my %reportrow = (
@@ -77,15 +95,18 @@ sub logsummaryQuery {
                     playerid => $startvalues[2],
                     inputrate => $startvalues[3],
                     outputrate    => $startvalues[6],
+                    outtype      => $startvalues[7],    # (SqueezeDSP fork) the engine's --formatout: DSF, WAV, ...
                     preamp     => $startvalues[10],    
                     internalgain => $startvalues[14],   # <-- 2026/03/27
     				peakdBfs     => $endvalues[13],
     				inputpeak    => $endvalues[17],     # <-- 2026/03/27
                 );
+                $reportrow{held} = $heldNext if defined $heldNext;
                 push @reportlines, \%reportrow;
+                $heldFor = \%reportrow;
                 $trackcount++;
             }
-        } 
+        }
     }
     close(FILE);
     
@@ -107,6 +128,9 @@ sub logsummaryQuery {
         $request->addResult("internalgain_$trackpos", $reportrow->{internalgain});  # <-- 2026/03/27
 		$request->addResult("peakdBfs_$trackpos",     $reportrow->{peakdBfs});
 		$request->addResult("inputpeak_$trackpos",    $reportrow->{inputpeak}); # <-- 2026/03/27
+        # (SqueezeDSP fork) the output's type, and a DSF track's samples held at the limit (its DSF out line)
+        $request->addResult("outtype_$trackpos", $reportrow->{outtype});
+        $request->addResult("held_$trackpos", $reportrow->{held}) if defined $reportrow->{held};
         $trackpos++;
     }
 
@@ -379,9 +403,9 @@ sub readClientSettings {
     # PCM, which is WAV with its header and needs a player that reads one
     $request->addResult('dsp_ok', Plugins::SqueezeDSP::Configuration::playerTakes($client, 'dsp'));
     $request->addResult('wav_ok', Plugins::SqueezeDSP::Configuration::playerTakes($client, 'wav'));
-    # and Upsample: whether it can run for this player (an ffmpeg with soxr, a known max), why
-    # not, its two targets (44.1k family, 48k family) for its output and max rate as stored, and
-    # the ffmpeg LMS uses
+    # and Upsample: whether it can run for this player (the stream-start hook, a known max; the engine
+    # resamples, so no ffmpeg or soxr since 0.1.72.37), why not, and its two targets (44.1k family,
+    # 48k family) for its output and max rate as stored
     my $prefs = Plugins::SqueezeDSP::Configuration::clientPrefs($client);
     my $out = Plugins::SqueezeDSP::Configuration::outputFormat( $client, $prefs );
     # and the output itself when it is a reduced stream (MP3, OPS, OGG: Configuration::reducedOutput), with the
@@ -405,9 +429,12 @@ sub readClientSettings {
         @t ? Plugins::SqueezeDSP::Upsample::top(@t) : '';
     } ( 'FLAC', Plugins::SqueezeDSP::Configuration::playerTakes( $client, 'wav' ) ? 'WAV' : 'FLAC' );
     $request->addResult('up_limits', join( ',', @limits ));
-    $request->addResult('up_ffmpeg', Plugins::SqueezeDSP::Upsample::ffmpegPath() // '');
-    # and the sox the intermediate and minimum phases need (LMS ships one)
-    $request->addResult('up_sox', Plugins::SqueezeDSP::Upsample::soxPath() // '');
+    # and native DSD out (Configuration::dsdOutTakes): a player that lists dsf itself, its output not a reduced stream
+    $request->addResult('dsd_out_ok', Plugins::SqueezeDSP::Configuration::dsdOutTakes( $client, $out ));
+    # and the Sample Rate Converter to DSD (Configuration::dsdSpec): DSD out and the stream-start hook (WavLength); no
+    # soxr (the engine upsamples, 0.1.72.33) and no max rate (the DSP runs at the converter's own rate)
+    $request->addResult('up_dsd_ok', ( Plugins::SqueezeDSP::Configuration::dsdOutTakes( $client, $out )
+        && $Plugins::SqueezeDSP::Upsample::INSTALLED ) ? 1 : 0);
 
     if (open(my $fh, '<', $myJSONFile)) {
         local $/;

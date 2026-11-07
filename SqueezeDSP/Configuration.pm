@@ -157,6 +157,10 @@ sub initConfiguration {
 			my $flac = ( $state =~ /\bpath=engine\b/ ) ? 'FLACENGINE' : 'FLAC24';
 			my ($out) = $state =~ /\bout=(\w+)/;
 			my @formats = isReduced($out) ? ( $out ) : ( $out eq 'WAV' ) ? ( 'WAV', $flac ) : ( $flac );
+			# native DSD out: the DSF rule, its own output format, ahead of the PCM ones; the converter to DSD: a dsf rule for
+			# every type, ahead of the PCM ones
+			unshift @formats, 'DSF' if $state =~ /\bdsdout=on\b/;
+			unshift @formats, 'DSFUP' if $state =~ /\bup=dsd\b/;
 			# the same settings the state was taken from, the targets for each template's own output: a PCM-mode
 			# player's FLAC rules stop at FLAC's cap, as LMS's flac 1.3.4 refuses 705.6k and 768k
 			my $prefs = clientPrefs($client);
@@ -164,7 +168,8 @@ sub initConfiguration {
 
 			# Generate and print a template for each format
 			foreach my $fmt (@formats) {
-				my $up = ( $on && !isReduced($fmt) ) ? upsampleSpec( $client, $prefs, $fmt eq 'WAV' ? 'WAV' : 'FLAC' ) : undef;
+				my $up = $fmt eq 'DSFUP' ? dsdSpec( $client, $prefs, $out )
+				       : ( $on && !isReduced($fmt) && $fmt ne 'DSF' ) ? upsampleSpec( $client, $prefs, $fmt eq 'WAV' ? 'WAV' : 'FLAC' ) : undef;
 				my $t = template($clientID, $fmt, modelSlot($client), $up);
 				print $fh $t;
 				print $fh "\n";
@@ -216,22 +221,91 @@ sub clientState {
     return STATE_OFF unless defined $prefs->{Bypass} && $prefs->{Bypass} eq '0';
 
     my $out = outputFormat( $client, $prefs );
-    # Upsample records its targets and filter options too, so a change to any of them rewrites the rules; a
-    # reduced stream is never upsampled (upsampleSpec)
+    # Upsample records its targets and its filters too (the engine's --upfilter, 0.3.20), so a change to any of them
+    # rewrites the rules; a reduced stream is never upsampled (upsampleSpec)
     my $spec = upsampleSpec( $client, $prefs );
-    my @up = $spec ? ( 'up=on', "ut=$spec->{f44}.$spec->{f48}", "uq=$spec->{precision}", "us=$spec->{steep}", "ub=$spec->{passband}", "uph=$spec->{phase}" ) : ( 'up=off' );
+    # the Sample Rate Converter to DSD (dsdSpec): its DSD rate, the DSP's rate and its filters
+    my $dspec = $spec ? undef : dsdSpec( $client, $prefs, $out );
+    my @up = $spec ? ( 'up=on', "ut=$spec->{f44}.$spec->{f48}", 'uf=' . ( $spec->{filters} =~ tr/,/./r ) )
+           : $dspec ? ( 'up=dsd', "udr=$dspec->{dsdrate}", 'dsdp=' . ( $dspec->{native} ? 'native' : $dspec->{f44} ),
+                        'uf=' . ( $dspec->{upfilter} =~ tr/,/./r ) )
+           : ( 'up=off' );
     # MP3 at a Bitrate Limiting records the limit, so a new limit rewrites the rules
     my $kbps = mp3Limit( $client, $out );
     push @up, "br=$kbps" if $kbps;
 
-    # DSD's decoder and resampler (Upsample::dsdFilter) depend on the server's ffmpeg: after the restart a new
+    # DSD's decoder and resampler (Upsample::dsdFilter, a DFF) depend on the server's ffmpeg: after the restart a new
     # ffmpeg needs, one with soxr, one without it or none (DSDPlayer's dsdplay: dxr=dsdplay, else LMS's sox: dxr=sox)
     # rewrites the rules
     my @state = ( 'dsp=on', "out=$out", @up, 'model=' . modelSlot($client), 'dxd=' . dxdTarget( $client, $spec, $out ),
                   'dxr=' . dsdTool() );
     # the static A/B diagnostic (no UI): the engine encodes FLAC itself, as 0.1.71 did
     push @state, 'path=engine' if defined $prefs->{OutputPath} && $prefs->{OutputPath} eq 'engine';
+    # native DSD out: its own rule and dsf first in the list, and the DSP's rate there (dsdOutDSP), so turning it on or
+    # off, or a new rate, rewrites the rules. Only with the converter off: on PCM every track goes out as PCM, on DSD
+    # as DSD at the converter's rate (Simon 2026-11-03: "If no upsampling is on for DSD or PCM it outputs as the
+    # original source only. Upsampling takes care of the rest.")
+    push @state, 'dsdout=on', 'dsdp=' . ( dsdNative($prefs) ? 'native' : dsdOutDSP($prefs) )
+        if !$spec && !$dspec && dsdOut( $client, $prefs, $out );
     return join( ',', @state );
+}
+
+# The Sample Rate Converter to DSD (Upsample 'dsd'; TemplateConfig template_DSFUP; Simon 2026-11-03: "Call upsample
+# Sample Rate Converter and we choose either DSD or PCM here"): every track out as DSD at the player's UpsampleDSDRate.
+# A PCM track reaches the engine at its own rate and the engine takes it to 705.6k (TemplateConfig $CONVRATE) itself, with the
+# player's filters (upfilter, Upsample::filters), the DSP there (0.1.72.33; Simon 2026-11-04: "for PCM to DSD we do it on
+# the high rate after resampling before we push it to the SDM"). A DSD track keeps DSD out's DSP rate (dsdOutDSP: DXD
+# or 176.4k; Simon: "currently we have at at DXD for a DSD source"); where ffmpeg decodes it (DFF), its soxr takes it
+# there (Upsample::dsdFilter, its own defaults). Only where the player can
+# have DSD out (dsdOutTakes: it lists dsf, its output is not a reduced stream) and the stream-start hook is in (it
+# states each stream's length, WavLength.pm); no soxr needed. Else undef: the player plays as with the converter off.
+sub dsdSpec {
+    my ( $client, $prefs, $out ) = @_;
+    $prefs ||= {};
+    return undef unless Plugins::SqueezeDSP::Upsample::mode($prefs) eq 'dsd';
+    $out //= outputFormat( $client, $prefs );
+    return undef unless dsdOutTakes( $client, $out );
+    return undef unless $Plugins::SqueezeDSP::Upsample::INSTALLED;
+    my %o = Plugins::SqueezeDSP::Upsample::options( { %$prefs, UpsampleTarget => 'fixed' } );
+    my $dsp = dsdOutDSP($prefs);
+    return { %o, f44 => $dsp, f48 => $dsp, dsd => 1, upfilter => Plugins::SqueezeDSP::Upsample::filters($prefs),
+             native => dsdNative($prefs) };
+}
+
+# DSD out's DSP rate (TemplateConfig template_DSF), the player's DSDOutDSP: DXD, 352.8k, unless it is 176400. Simon
+# 2026-11-03: DXD "is how it should be done to preserve as much as possible", then "two options for DSD using 176.4 for
+# more cpu bound sytems and full DXD for those that can" (DXD costs the engine 20-28% more at DSD64, 10% at DSD256, for
+# the same sound: ledger DSD OUT DSP RATE). Not the player's PCM rates: its output is DSD.
+sub dsdOutDSP {
+    my $v = ( shift || {} )->{DSDOutDSP};
+    return ( defined $v && "$v" eq '176400' ) ? 176400 : 352800;
+}
+
+# Native DSD processing (the native round, 2026-11-07; Simon: "an option for those with high spec systems, default is
+# still our DXD route"): the player's DSDOutDSP 'native'. A DSF on our engine's decoder runs the DSP at its own DSD rate
+# (--samplerate=native, through the player's DSDIntegrator, which the engine reads at each track) and goes out from
+# there; dsdOutDSP stays DXD for everything else on the route (a DFF, WavPack DSD, a DSD rate out under the source's).
+sub dsdNative {
+    my $v = ( shift || {} )->{DSDOutDSP};
+    return ( defined $v && lc("$v") =~ /^[ "]*native[ "]*$/ ) ? 1 : 0;
+}
+
+# Native DSD out (TemplateConfig template_DSF): the player's DSDOut is on and the player can have it (dsdOutTakes).
+# The DSD rate, max and modulator are the engine's to read at each track (DSDOutRate, DSDOutMax, DSDOutMod).
+sub dsdOut {
+    my ( $client, $prefs, $out ) = @_;
+    my $on = ( $prefs || {} )->{DSDOut};
+    return 0 unless defined $on && "$on" =~ /^(?:1|on|true)$/i;
+    return dsdOutTakes( $client, $out );
+}
+
+# Whether a player can have DSD out at all, for dsdOut and the pages (readClientSettings dsd_out_ok): it lists dsf
+# itself (so it plays DSD: ledger DSD AS AN UPSAMPLE TARGET, DSD out only to a player that lists dsf), and its output is
+# not a reduced stream
+sub dsdOutTakes {
+    my ( $client, $out ) = @_;
+    return 0 unless defined $client && !isReduced($out);
+    return ( grep { $_ eq 'dsf' } nativeFormats($client) ) ? 1 : 0;
 }
 
 # What decodes DSD and takes it to its target: ffmpeg through soxr ('soxr') or its own resampler ('swr'); with no
@@ -342,11 +416,11 @@ sub _lossyApp {
     return undef;
 }
 
-# The player's upsampling: its two targets and checked filter options, or undef when Upsample is
-# off or cannot run for it (no ffmpeg with soxr, no hook, no known max: Upsample::available).
+# The player's upsampling: its two targets, its options (Upsample::options) and its PCM filters (filters, the engine's
+# --upfilter: Upsample::pcmFilters), or undef when Upsample is off or cannot run for it (no hook, no known max:
+# Upsample::available; the engine resamples, so no ffmpeg or soxr is needed since 0.3.20).
 # The targets stop at the cap for its output (768k with WAV out, 384k with FLAC) or at the max rate
-# chosen, whichever is lower (Upsample::cap), so the marker's ut= records a change of either.
-# The intermediate and minimum phases need sox; without it the player gets linear. A fixed target
+# chosen, whichever is lower (Upsample::cap), so the marker's ut= records a change of either. A fixed target
 # is both families' target, the player's top rate (Upsample::top), so the marker's ut= records it.
 # $out: the output the targets are for ('WAV' or 'FLAC'), the player's own when not given. A
 # PCM-mode player's FLAC rules ask for 'FLAC'; their targets follow from what ut= records.
@@ -360,9 +434,8 @@ sub upsampleSpec {
     my ( $ok, undef, $f44, $f48 ) = Plugins::SqueezeDSP::Upsample::available( $client,
         Plugins::SqueezeDSP::Upsample::cap( $out, $o{max} ) );
     return undef unless $ok;
-    $o{phase} = 'linear' unless Plugins::SqueezeDSP::Upsample::soxPath();
     $f44 = $f48 = Plugins::SqueezeDSP::Upsample::top( $f44, $f48 ) if $o{target} eq 'fixed';
-    return { f44 => $f44, f48 => $f48, %o };
+    return { f44 => $f44, f48 => $f48, %o, filters => Plugins::SqueezeDSP::Upsample::pcmFilters($prefs) };
 }
 
 # What a player can take, asked of its own list, not of the one applyFormatOrder set:
@@ -424,7 +497,7 @@ sub modelSlot {
 # target, so the player keeps one rate. Up to the 384k cap that is the rate above (DXD, or the
 # player's top 44.1k-family rate); with WAV out it follows the 768k cap to 705.6k, and a max
 # rate chosen lowers it as it lowers every track. A DSF gets there through our engine's own
-# decoder (dsdEngine); a DFF through ffmpeg's soxr when that ffmpeg has soxr (Upsample::dsdFilter),
+# decoder (dsdEngine); a DFF through ffmpeg's soxr when that ffmpeg has soxr (Upsample::dsdFilter, its own defaults),
 # as it takes DSD128 and above down to DXD; without soxr, ffmpeg's own resampler does. A reduced stream ($out MP3, OPS, OGG) takes DSD to 44.1k: its
 # encoder works at 48k or under (Vorbis at the rate it is given), so a higher rate would only
 # cost the DSP time.
@@ -597,6 +670,10 @@ sub applyFormatOrder {
     # leads with its own format alone: its rules take every type, within the max or above it.
     my ($out) = $state =~ /\bout=(\w+)/;
     my @lead = isReduced($out) ? ( reducedStream($out) ) : ( $out // '' ) eq 'WAV' ? ( 'wav', 'flc' ) : ( 'flc' );
+    # native DSD out: dsf first, so a DSF takes our dsf dsf rule (ahead of LMS's own, which is * *); every other
+    # source finds no rule to dsf and goes on to the PCM output. The converter to DSD: dsf first too, where every type
+    # has a rule to it (TemplateConfig template_DSFUP)
+    unshift @lead, 'dsf' if $state =~ /\bdsdout=on\b/ || $state =~ /\bup=dsd\b/;
     my %covered = map { $_ => 1 } coveredFormats();
 
     unless ( $client->can('myFormats') && ref $client->myFormats eq 'ARRAY' ) {
@@ -728,21 +805,31 @@ sub template {
         Plugins::SqueezeDSP::Utils::fatal( $client, 'template', "no conf template $format" );
         return '';
     };
-    # linear phase is ffmpeg's soxr, intermediate and minimum sox's rate (Upsample.pm @PHASES); DSD is decoded by
-    # DSDPlayer's dsdplay or LMS's sox where the server has no ffmpeg; MP3 at a Bitrate Limiting is encoded at it
-    my $sox = $up && $up->{phase} ne 'linear';
+    # DSD is decoded by DSDPlayer's dsdplay or LMS's sox where the server has no ffmpeg; MP3 at a Bitrate Limiting is
+    # encoded at it
     my $dsd = dsdTool();
     my %opts = ( dsd => ( $dsd eq 'dsdplay' || $dsd eq 'sox' ) ? $dsd : 'ffmpeg', dsdEngine => dsdEngine( $client, $up, $format ) );
     $opts{kbps} = mp3Limit( $client, $format ) if defined $client;
-    my $template = $source->( !$up ? 0 : $sox ? 2 : 1, \%opts );
+    if ( $format eq 'DSF' && defined $client ) {
+        $opts{dsdp} = dsdOutDSP( clientPrefs($client) );
+        $opts{dsdn} = dsdNative( clientPrefs($client) );
+    }
+    if ( $format eq 'DSFUP' && $up ) {
+        # the converter to DSD: its rate, the player's filters for a PCM source, and DSD out's DSP rate for a DSD source
+        # that reaches the engine as PCM (WavPack DSD)
+        $opts{dsdrate}  = $up->{dsdrate};
+        $opts{upfilter} = $up->{upfilter};
+        $opts{dsdp}     = $up->{f44};
+        $opts{dsdn}     = $up->{native};
+    }
+    my $template = $source->( $up ? 1 : 0, \%opts );
 
-    # the target is picked per track at stream start (Upsample::_tokenize); the filter options are the player's
-    if ( $up ) {
+    # the target is picked per track at stream start (Upsample::_tokenize); the filters are the player's PCM ones (the
+    # converter to DSD's template takes its own from %opts, and has neither placeholder)
+    if ( $up && $format ne 'DSFUP' ) {
         my $rate = Plugins::SqueezeDSP::Upsample::PLACEHOLDER() . "$up->{f44}_$up->{f48}";
-        my $opts = $sox ? Plugins::SqueezeDSP::Upsample::soxOptions($up) : Plugins::SqueezeDSP::Upsample::ffOptions($up);
         $template =~ s/\$UPRATE\$/$rate/g;
-        $template =~ s/\$UPOPTS\$/$opts/g;
-        $template =~ s/\$UPSOX\$/$opts/g;
+        $template =~ s/\$UPFILTER\$/$up->{filters}/g;
     }
     
     # Substitute placeholders (same as before)
@@ -757,7 +844,7 @@ sub template {
     }
     
     my $dxd = dxdTarget( $client, $up, $format );
-    my $dxdaf = Plugins::SqueezeDSP::Upsample::dsdFilter( $dxd, $up );
+    my $dxdaf = Plugins::SqueezeDSP::Upsample::dsdFilter($dxd);
 
     $template =~ s/\$CONVAPP\$/$Plugins::SqueezeDSP::Plugin::convolver/g;
     $template =~ s/\$MODEL\$/$model/g;

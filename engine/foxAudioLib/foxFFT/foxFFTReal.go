@@ -107,13 +107,15 @@
 //
 // For the convolver sizes the buffer dimensions are:
 //
-//	44.1/48/88.2/96 kHz  : realBuf N=4096, halfBuf N/2+1=2049
-//	176.4/192 kHz        : realBuf N=8192, halfBuf N/2+1=4097
+//	44.1/48/88.2/96 kHz  : realBuf N=8192, halfBuf N/2+1=4097 (partitions of 4096)
+//	176.4 kHz and up     : realBuf N=16384, halfBuf N/2+1=8193 (partitions of 8192; SqueezeDSP fork: these
+//	                       sizes were 4096 and 8192 here, which the convolver never ran)
 package foxFFT
 
 import (
 	"fmt"
 	"math"
+	"math/bits"
 	"sync"
 )
 
@@ -185,8 +187,45 @@ func getRealPlan(N int) *realFFTPlan {
     case RealFFTSize8192:
         return &realPlan8192
     default:
-        return nil
+        return bigRealPlan(N)
     }
+}
+
+// (SqueezeDSP fork) Real plans above 8192 points (up to bigRealPlanMax) and pooled work buffers above 4096 (up to
+// bigPlanMax), built on first use. The convolver's partitions at 176.4k and up are 8192 samples, so its real FFT is
+// 16384 points: it ran realPostProcessGeneric and realPreProcessInverseGeneric (a Sincos per bin, both ways) and
+// allocated its 8192-point work buffer at every call. A plan holds the twiddles the generic path computes, by the
+// same expression, and its loops are the generic ones, so the same bits (TestBigPlansSameBits). Larger sizes (the
+// gain estimates' one-off FFTs of the whole impulse) keep the generic path and an allocated buffer, as before.
+const bigRealPlanMax = 1 << 18
+
+var (
+	bigRealPlans    [19]realFFTPlan
+	bigRealPlanOnce [19]sync.Once
+	bigWorkPools    [18]sync.Pool // by log2 of the length
+)
+
+func init() {
+	for i := range bigWorkPools {
+		m := 1 << i
+		bigWorkPools[i].New = func() any { buf := make([]complex128, m); return &buf }
+	}
+}
+
+func bigRealPlan(N int) *realFFTPlan {
+	if N <= RealFFTSize8192 || N > bigRealPlanMax || !IsPow2(N) {
+		return nil
+	}
+	i := bits.Len64(uint64(N)) - 1
+	bigRealPlanOnce[i].Do(func() { bigRealPlans[i] = buildRealFFTPlan(N) })
+	return &bigRealPlans[i]
+}
+
+func bigWorkPool(M int) *sync.Pool {
+	if M <= 4096 || M > bigPlanMax || !IsPow2(M) {
+		return nil
+	}
+	return &bigWorkPools[bits.Len64(uint64(M))-1]
 }
 
 // ─── Work-buffer pool ────────────────────────────────────────────────────────
@@ -221,6 +260,9 @@ func getWorkBuf(M int) *[]complex128 {
     case 4096:
         return workPool4096.Get().(*[]complex128)
     default:
+        if p := bigWorkPool(M); p != nil {
+            return p.Get().(*[]complex128)
+        }
         buf := make([]complex128, M)
         return &buf
     }
@@ -242,6 +284,10 @@ func putWorkBuf(M int, p *[]complex128) {
         workPool2048.Put(p)
     case 4096:
         workPool4096.Put(p)
+    default:
+        if bp := bigWorkPool(M); bp != nil {
+            bp.Put(p)
+        }
     }
 }
 

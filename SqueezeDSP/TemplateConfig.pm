@@ -6,10 +6,27 @@ package Plugins::SqueezeDSP::TemplateConfig;
 
 sub get_config_revision
 {
-	my $configrevision = "0.3.14";
+	my $configrevision = "0.3.20";
 	return $configrevision;
 }
 
+# 0.3.20 Upsample (PCM) resamples in the engine: every type takes its own route to the engine, which takes it to the
+#        target itself before the DSP, up or down (--upsample, the target picked per track at stream start as before),
+#        by the player's PCM filters (--upfilter, Upsample::pcmFilters); no ffmpeg, soxr or sox stage. A WAV or AIFF
+#        the engine reads seeks with its own --skip again. The rule state records the filters (uf=), no longer soxr's
+#        options; DSD's soxr (a DFF) runs at its own defaults whatever Upsample is.
+# 0.3.19 The Sample Rate Converter to DSD upsamples in the engine: a PCM source takes its own route to the engine, which
+#        takes it to 705.6k with the player's filters (--upsample, --upfilter), the DSP there, then a PCM source's
+#        modulator designs (--dsdsource=pcm); no ffmpeg or soxr before it. WavPack DSD to DSD out's DSP rate, at unity
+#        (template_DSFUP). The rule state records the filters (uf=).
+# 0.3.18 The Sample Rate Converter to DSD at PCM's level: a PCM source goes in at SACD's 0 dB (--dsdoutgain=-6.02),
+#        a DSD source at unity as before (template_DSFUP).
+# 0.3.17 The Sample Rate Converter to DSD (template_DSFUP, Configuration::dsdSpec): every type to dsf at the player's
+#        DSD rate, through the DSP at DSD out's rate (up=dsd). DSD out (the converter off) keeps a DSF at its own rate:
+#        its rule says --dsdrate=source --dsdmax=22579200, so the player's DSDOutRate and DSDOutMax play no part.
+# 0.3.16 DSD out runs the DSP at DXD, 352.8k, at every DSD rate (template_DSF; was 176.4k).
+# 0.3.15 Native DSD out (Configuration::dsdOut, template_DSF): with the player's DSDOut on and dsf in its own list, a
+#        DSF goes through our engine's decoder, the DSP at 176.4k and our modulator, out as a DSF stream (dsdout=on).
 # 0.3.14 A DSF goes to our engine's own DSD decoder at every DSD target (Configuration::dsdEngine): the 48k family
 #        (Upsample's fixed 96k, 384k, 768k) and 705.6k now too, through the decoder's stage 3. A DFF keeps its decoder.
 # 0.3.13 A DSF goes to our engine's own DSD decoder (_dsdEngine) wherever the player's DSD target is in the 44.1k family
@@ -103,26 +120,6 @@ my $RAW24  = '--formatin=PCM --be=false --bitsin=24 --samplerate=$SAMPLERATE$ --
 my $FFRAW  = '-c:a pcm_s24le -ar $SAMPLERATE$ -ac $CHANNELS$ -f s24le -';
 my $SOXRAW = '-t raw -e signed-integer -b 24 -L -r $SAMPLERATE$ -c $CHANNELS$ -';
 my $SPTRAW = '--formatin=PCM --be=false --bitsin=16 --samplerate=44100 --channels=2';
-
-# Upsample (Upsample.pm): ffmpeg's soxr resamples in floating point before the engine, and the
-# engine reads 32-bit raw as IEEE float (ledger ENGINE RAW 32-BIT IS FLOAT), so nothing between the
-# decoder and the engine can clip an inter-sample peak (ledger SOX CLIPS INSIDE RATE).
-#   $UPRATE$  the target, written per player as SQDSPUP_<44.1k>_<48k> and picked per track at stream start
-#   $UPOPTS$  the player's soxr options, written per player
-# ffmpeg reads a pipe as pipe:0, which every version opens ('-' needs the fd protocol since 6.1,
-# fftools ffmpeg_demux.c). LMS hands an I rule's $FILE$ over as '-', so a stdin rule names pipe:0 itself.
-my $UPAF  = '-af aresample=$UPRATE$:$UPOPTS$ -c:a pcm_f32le -ac $CHANNELS$ -f f32le -';
-my $F32IN = '--formatin=PCM --be=false --bitsin=32 --samplerate=$UPRATE$ --channels=$CHANNELS$';
-
-# The intermediate and minimum phases (Upsample.pm @PHASES): sox's rate, which clips inside rate, after
-# HEADROOM dB taken off (by sox's gain, or in float by a decoding ffmpeg, whose overs sox's input would
-# clip), writing float; then ffmpeg puts the HEADROOM back in float, so the engine meets the same level
-# and the same overs as with soxr. -D: no dither on sox's float output.
-#   $UPSOX$  the player's sox rate options (Upsample::soxOptions), written per player
-my $HEAD    = 6;
-my $SOXF32  = '-t raw -e floating-point -b 32 -L -';
-my $SOXRATE = 'rate $UPSOX$ $UPRATE$';
-my $UPBACK  = "[ffmpeg] -loglevel quiet -probesize 32 -f f32le -ar \$UPRATE\$ -ac \$CHANNELS\$ -i pipe:0 -af volume=${HEAD}dB -c:a pcm_f32le -ar \$UPRATE\$ -ac \$CHANNELS\$ -f f32le -";
 
 # How each input type reaches the engine: [ type, capabilities (no D), command up to the engine, kind ].
 #
@@ -265,80 +262,25 @@ sub _input {
 	return ( $caps, $command );
 }
 
-# The upsample route for one input command: the same decoder, then ffmpeg's soxr to $UPRATE$ in
-# float, then the engine told 32-bit float at $UPRATE$. One route per way a decoder can hand over:
-# ffmpeg decoding (it resamples in the same pass), raw PCM (ffmpeg reads it as the engine was told),
-# a WAV header with the file's length (ffmpeg reads the header), and the engine reading a WAV or AIFF
-# itself (ffmpeg reads the file instead). Any other shape dies, so a new input type needs a route.
-# -probesize 32: every input here is PCM whose format is given or in a header, so ffmpeg has nothing
-# to analyse; its default reads about 5 s of input before the first output, and LMS feeds a stream
-# 32 KB at a time only as output comes back, every 0.4 s while none does (ledger
-# A LOCAL FILE ON STDIN CRAWLS). The ffmpeg decoder route keeps ffmpeg's defaults: it decodes.
-my $FFUP = '[ffmpeg] -loglevel quiet -probesize 32';
-sub _ffup { return "$FFUP $_[0] $UPAF" }
-
-# The sox route for one input: sox reads it as given ($input: its format options and file), takes the
-# headroom off unless a decoding ffmpeg already has ($gain), resamples, writes float, and ffmpeg puts the
-# headroom back. Integers enter sox exactly; float (which can hold overs) reaches it only from an ffmpeg
-# that has already taken the headroom off, since sox's input conversion clips at full scale too.
-sub _soxup {
-	my ( $input, $gain ) = @_;
-	return "[sox] -q -D $input $SOXF32 " . ( $gain ? "gain -$HEAD " : '' ) . "$SOXRATE | $UPBACK";
-}
-my $FFHEAD = "-af volume=-${HEAD}dB -c:a pcm_f32le -ar \$SAMPLERATE\$ -ac \$CHANNELS\$ -f f32le -";
-my $SOXFIN = '-t raw -e floating-point -b 32 -L -r $SAMPLERATE$ -c $CHANNELS$ -';
-
-# $sox: the intermediate or minimum phase (sox's rate instead of ffmpeg's soxr)
-# $stdin: the rule reads LMS's pipe (I), where $FILE$ would reach ffmpeg as '-'
+# The upsample route for one input command (Upsample.pm, 0.3.20): the same command, its engine told to resample before
+# the DSP to $UPRATE$ (the target, SQDSPUP_<44.1k>_<48k> as written, picked per track at stream start:
+# Upsample::_tokenize) by the player's PCM filters ($UPFILTER$, Upsample::pcmFilters). Every input command here ends with
+# the engine and its own input arguments, so the flags go on its end; any other shape dies, so a new input type needs a
+# look. Until 0.3.20 ffmpeg's soxr (or sox's rate) resampled before the engine, which then read 32-bit float.
+my $UPFLAGS = ' --upsample=$UPRATE$ --upfilter=$UPFILTER$';
 sub _upsample {
-	my ( $cmd, $sox, $stdin ) = @_;
-	my $tail;
-	# ffmpeg reads the file instead of the engine, so a seek's $START$ is ffmpeg's (_build gives it -ss)
-	if ( $cmd eq $SELF ) {
-		my $file = $stdin ? 'pipe:0' : '$FILE$';
-		return _ffup("\$START\$ -i $file") . " | $ENGINE $F32IN" unless $sox;
-		# a WAV or AIFF can be float: ffmpeg reads it and takes the headroom off in float
-		return "$FFUP \$START\$ -i $file $FFHEAD | " . _soxup( $SOXFIN, 0 ) . " | $ENGINE $F32IN";
-	}
-
-	$tail = "$FFRAW | $ENGINE $RAW24";
-	if ( index( $cmd, '[ffmpeg] ' ) == 0 && substr( $cmd, -length($tail) ) eq $tail ) {
-		return substr( $cmd, 0, -length($tail) ) . "$UPAF | $ENGINE $F32IN" unless $sox;
-		return substr( $cmd, 0, -length($tail) ) . "$FFHEAD | " . _soxup( $SOXFIN, 0 ) . " | $ENGINE $F32IN";
-	}
-
-	for my $raw ( [ $RAW, 's$SAMPLESIZE$le', '$SAMPLESIZE$' ], [ $RAW16, 's16le', 16 ], [ $RAW24, 's24le', 24 ] ) {
-		$tail = "$ENGINE $raw->[0]";
-		next unless substr( $cmd, -length($tail) ) eq $tail;
-		return substr( $cmd, 0, -length($tail) ) . _ffup("-f $raw->[1] -ar \$SAMPLERATE\$ -ac \$CHANNELS\$ -i pipe:0") . " | $ENGINE $F32IN" unless $sox;
-		return substr( $cmd, 0, -length($tail) ) . _soxup( "-t raw -e signed-integer -b $raw->[2] -L -r \$SAMPLERATE\$ -c \$CHANNELS\$ -", 1 ) . " | $ENGINE $F32IN";
-	}
-
-	# Spotty writes 16/44.1/2 whatever LMS's view of the track is
-	$tail = "$ENGINE $SPTRAW";
-	if ( substr( $cmd, -length($tail) ) eq $tail ) {
-		( my $af = $UPAF )  =~ s/\$CHANNELS\$/2/;
-		( my $in = $F32IN ) =~ s/\$CHANNELS\$/2/;
-		return substr( $cmd, 0, -length($tail) ) . "$FFUP -f s16le -ar 44100 -ac 2 -i pipe:0 $af | $ENGINE $in" unless $sox;
-		( my $up = _soxup( '-t raw -e signed-integer -b 16 -L -r 44100 -c 2 -', 1 ) ) =~ s/\$CHANNELS\$/2/g;
-		return substr( $cmd, 0, -length($tail) ) . "$up | $ENGINE $in";
-	}
-
-	# a decoder's WAV header with the file's length: integer PCM from faad, mac, wvunpack, sls, mov123
-	$tail = "| $ENGINE";
-	if ( substr( $cmd, -length($tail) ) eq $tail ) {
-		return substr( $cmd, 0, -length($tail) ) . '| ' . _ffup('-i pipe:0') . " | $ENGINE $F32IN" unless $sox;
-		return substr( $cmd, 0, -length($tail) ) . '| ' . _soxup( '--ignore-length -t wav -', 1 ) . " | $ENGINE $F32IN";
-	}
-	die "TemplateConfig: no upsample route for: $cmd\n";
+	my $cmd = shift;
+	my $at = rindex( $cmd, $ENGINE );
+	die "TemplateConfig: no upsample route for: $cmd\n" if $at < 0 || index( substr( $cmd, $at ), '|' ) >= 0;
+	return $cmd . $UPFLAGS;
 }
 
 # Every input type, written with each template's output stage. $nod and $d return [caps, command] for the
 # rule without D and the rule with it; a repeated header is the next instance, tried only when the one
 # before is rejected, so a track LMS must take down to the player's max lands on the D rule. $plain is the
 # output stage alone. With $up every type but DSD takes the upsample route, in one rule with D: within the
-# max or above it, the track reaches the engine at the target, so nothing after the engine resamples.
-# $up: 0 none, 1 ffmpeg's soxr (linear phase), 2 sox's rate (intermediate or minimum phase).
+# max or above it, the engine takes the track to the target, so nothing after the engine resamples.
+# $up: 0 none, 1 the engine resamples (_upsample).
 # $o: the conf's options (Configuration::template): dsd, with no ffmpeg on the server 'dsdplay' (_dsdPlay) or 'sox'
 # (_dsdSox), else ffmpeg decodes DSD; dsdEngine, a DSF on our engine (_dsdEngine).
 sub _build {
@@ -352,10 +294,7 @@ sub _build {
 			next;
 		}
 		if ( $up ) {
-			# a WAV or AIFF file: ffmpeg reads it on this route, and starts it with -ss (as LMS's own rules do)
-			my $c = $caps;
-			$c =~ s/\{START=--skip=%t\}/{START=-ss %t}/ if $command eq $SELF;
-			$text .= _rule( $in, $out, "${c}D", $plain->( _upsample( $command, $up == 2, $caps !~ /F/ ) ) );
+			$text .= _rule( $in, $out, "${caps}D", $plain->( _upsample($command) ) );
 			next;
 		}
 		$text .= _rule( $in, $out, @{ $nod->( $caps, $command ) } ) if $nod;
@@ -433,6 +372,68 @@ sub _reduced {
 			next;
 		}
 		$text .= _rule( $input->[0], $out, "$caps$add", "$command --formatout=WAV | $enc" );
+	}
+	return $text;
+}
+
+# Native DSD out (Configuration::dsdOut, Simon 2026-11-02: "native DSD is the way we need to go"): a DSF read and
+# decoded by our engine, through the player's DSP at DXD (352.8k, whatever the DSD rate; Simon 2026-11-03: "this is
+# how it should be done to preserve as much as possible") or at 176.4k where the player's DSDOutDSP asks for it, for a
+# server short of CPU (Configuration::dsdOutDSP, the option dsdp), and modulated back to DSD as a DSF stream
+# (engine/foxAudioLib/foxAudioEncoder/foxDSDEncoder; ledger OUR OWN DSD ENCODER). The DSD rate (the source's, or a
+# fixed one), its max and the modulator are the player's DSDOutRate, DSDOutMax and DSDOutMod, read by the engine at
+# each track, so a change to them needs no new rule. D bare, as LMS's own dsf dsf rule (convert.conf): LMS records a
+# DSF's rate as its DSD rate and asks for D. A seek and a cue track's end as the DSD to PCM rule (_dsdEngine). Only a
+# DSF: a DFF keeps the PCM route. Native (the option dsdn, Configuration::dsdNative, the native round): the DSP at the
+# source's own DSD rate (--samplerate=native).
+sub template_DSF {
+	my $o = $_[1] || {};
+	my $rate = $o->{dsdn} ? 'native' : ( $o->{dsdp} // '' ) eq '176400' ? 176400 : 352800;
+	return "\n" . _rule( 'dsf', 'dsf', 'FT:{START=--skip=%t}U:{END=--until=%v}D',
+		$ENGINE . " --formatin=DSD --input \$FILE\$ --samplerate=$rate \$START\$ \$END\$ --formatout=DSF --dsdrate=source --dsdmax=22579200" );
+}
+
+# The Sample Rate Converter to DSD (Configuration::dsdSpec, Upsample 'dsd'; Simon 2026-11-03: "Call upsample Sample
+# Rate Converter and we choose either DSD or PCM here"): every type out as DSD at the player's DSD rate ($o dsdrate,
+# given as the rate and its own max, so no DSD out setting of the player's plays a part). The engine is the last stage
+# and writes the DSF. One reading a pipe has its length stated at stream start (WavLength.pm: LMS's length plus a
+# margin, an upper bound: the engine ends the stream with the input).
+#   - A PCM source (0.1.72.33) takes its own route to the engine, the one it takes with no converter, and the engine
+#     upsamples it itself: to $CONVRATE by its own two-stage filters, the player's choice for a source at 48 kHz and
+#     under and another for hi-res ($o upfilter, Upsample::filters: --upfilter), the DSP there, then the modulator's
+#     designs for a PCM source (--dsdsource=pcm). No ffmpeg or soxr before it, so a WAV or AIFF the engine reads itself
+#     seeks with its own --skip. Level: in at SACD's 0 dB, its full scale at 50% modulation (--dsdoutgain=-6.02), the
+#     level DSD is mastered at and a DAC plays as loud as PCM full scale (Simon 2026-11-03: at the encoder's unity a
+#     PCM track played about 6 dB louder as DSD than upsampled to PCM; with HQPlayer the two were equal).
+#   - A DSD source keeps DSD out's DSP rate ($o dsdp, Configuration::dsdOutDSP; Simon 2026-11-04: "currently we have
+#     at at DXD for a DSD source"), its own modulation (decoded at gain 0, written at unity) and the DSD source's
+#     designs (the engine's default): a DSF through our engine's decoder, a DFF through its decoder ($DXD$,
+#     Configuration::dxdTarget of this spec, is the same rate). WavPack DSD: wvunpack decodes it to PCM here, but it is
+#     a DSD source (LMS's own convert.conf writes dsf and dff from it), so the engine takes it to dsdp instead.
+#     Native ($o dsdn, Configuration::dsdNative, the native round): a DSF's DSP at its own DSD rate (--samplerate=native;
+#     the engine decodes at DXD instead where the converter's rate is under the file's); a DFF and WavPack DSD at dsdp.
+# The engine's flags go before the DSD flags, which end the command for WavLength to find.
+my $CONVRATE = 705600;
+# a filter's name as the engine reads it (Upsample.pm's @FILTERS, 0.1.72.44: Kaiser, Gaussian, Half-band, Slow, Non-ringing)
+my $FILTER   = qr/(?:(?:short|long|xlong|gauss-(?:short|medium|long)|halfband|slow)-(?:lin|int|min)|nonring)/;
+sub template_DSFUP {
+	my ( $up, $o ) = @_;
+	$o ||= {};
+	my $rate = ( $o->{dsdrate} // '' ) =~ /^(?:2822400|5644800|11289600|22579200)$/ ? $o->{dsdrate} : 2822400;
+	my $tail = " --formatout=DSF --dsdrate=$rate --dsdmax=$rate";
+	my $filters = ( $o->{upfilter} // '' ) =~ /^$FILTER,$FILTER$/ ? $o->{upfilter} : 'short-int,short-lin';
+	my $dsdp = ( $o->{dsdp} // '' ) eq '176400' ? 176400 : 352800;
+	my $pcm = " --upsample=$CONVRATE --upfilter=$filters --dsdsource=pcm --dsdoutgain=-6.02";
+	my $text = "\n";
+	for my $input (@INPUTS) {
+		my ( $in, $caps, $command, $kind ) = @$input;
+		if ( ( $kind // '' ) eq 'dxd' ) {
+			my ( $c, $cmd ) = $in eq 'dsf' ? @{ _dsdEngine() } : _input( $input, $o );
+			$cmd =~ s/ --samplerate=\$DXD\$ / --samplerate=native / if $in eq 'dsf' && $o->{dsdn};
+			$text .= _rule( $in, 'dsf', "${c}D", $cmd . $tail );
+			next;
+		}
+		$text .= _rule( $in, 'dsf', "${caps}D", $command . ( $in eq 'wvpx' ? " --upsample=$dsdp" : $pcm ) . $tail );
 	}
 	return $text;
 }
