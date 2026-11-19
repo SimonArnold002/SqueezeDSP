@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Foxenfurter/foxAudioLib/foxUpsampler"
+	"github.com/Foxenfurter/foxAudioLib/gipsyUpsampler"
 )
 
 // upsampleStage (0.1.72.33): with an upsampler, every block goes up to its rate and the filters' last output follows
@@ -17,7 +17,7 @@ func TestUpsampleStage(t *testing.T) {
 	if got := ap.upsampleStage(in, 1, &wg); got != in {
 		t.Fatal("no upsampler: not the decoder's own channel")
 	}
-	u, err := foxUpsampler.New(44100, 705600, 2, foxUpsampler.DefaultCD, foxUpsampler.DefaultHiRes)
+	u, err := gipsyUpsampler.New(44100, 705600, 2, gipsyUpsampler.DefaultCD, gipsyUpsampler.DefaultHiRes)
 	if err != nil {
 		t.Fatal(err)
 	}

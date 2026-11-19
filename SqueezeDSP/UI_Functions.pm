@@ -206,6 +206,9 @@ sub saveallCommand {
         return $request->setStatusBadParams("Invalid JSON");
     }
     
+    # the player's state before this save (read from its settings file, not yet replaced)
+    my $was = $client ? Plugins::SqueezeDSP::Configuration::clientState($client) : undef;
+
     my $myJSONFile = Plugins::SqueezeDSP::Utils::getPrefFile($client);
     Plugins::SqueezeDSP::Utils::debug("Saving settings to: $myJSONFile");
     Plugins::SqueezeDSP::Utils::debug("JSON length: " . length($json));
@@ -215,8 +218,14 @@ sub saveallCommand {
     # before the seek below re-opens the stream, so it already uses the new rule
     Plugins::SqueezeDSP::Configuration::applyClientState($client) if $client;
 
+    # DSP off before and after: SqueezeDSP is in none of this player's path (no rules), so a setting saved for it
+    # changes nothing it plays and its track is not re-opened (ledger `saveallCommand` RE-OPENS A DSP-OFF PLAYER'S TRACK)
+    my $off = $client && $was eq Plugins::SqueezeDSP::Configuration::STATE_OFF
+        && Plugins::SqueezeDSP::Configuration::clientState($client) eq Plugins::SqueezeDSP::Configuration::STATE_OFF;
+    Plugins::SqueezeDSP::Utils::debug("DSP off before and after the save: the track is not re-opened") if $off;
+
     # Force DSP reload by seeking (if player available) - DO THIS BEFORE setStatusDone
-    if ($client) {
+    if ($client && !$off) {
         my $controller = $client->controller();
         if ($controller) {
             my $song = $controller->playingSong();
@@ -435,6 +444,10 @@ sub readClientSettings {
     # soxr (the engine upsamples, 0.1.72.33) and no max rate (the DSP runs at the converter's own rate)
     $request->addResult('up_dsd_ok', ( Plugins::SqueezeDSP::Configuration::dsdOutTakes( $client, $out )
         && $Plugins::SqueezeDSP::Upsample::INSTALLED ) ? 1 : 0);
+    # and LMS's "Prefer native format" (prioritizeNative), which SqueezeDSP needs off: on, both pages say so in red
+    # with a button that turns it off through LMS's own `pref` command; the plugin never changes it by itself (ledger
+    # THE PLUGIN DOES NOT SET prioritizeNative)
+    $request->addResult('prefer_native', Slim::Utils::Prefs::preferences('server')->get('prioritizeNative') ? 1 : 0);
 
     if (open(my $fh, '<', $myJSONFile)) {
         local $/;
@@ -466,7 +479,10 @@ sub readPresetSettings {
     Plugins::SqueezeDSP::Utils::debug("query: readPresetSettings");
     my $myJSONFile = Plugins::SqueezeDSP::Utils::getPrefFile($client);
     Plugins::SqueezeDSP::Utils::debug("Copying preset: $presetFileName to $myJSONFile");
-    
+    # "Exact track length" belongs to the player (what it needs to move on at a track's end), not to the sound: a preset
+    # leaves it as it was
+    my $exactWas = eval { Plugins::SqueezeDSP::Configuration::clientPrefs($client)->{ExactLength} };
+
     unless (copy($presetFileName, $myJSONFile)) {
         my $error = "Copy failed: $presetFileName → $myJSONFile: $!";
         Plugins::SqueezeDSP::Utils::debug("ERROR: $error");
@@ -489,6 +505,8 @@ sub readPresetSettings {
         $settings->{ClientName} = $client->name;
         $settings->{Client}->{Name} = $client->name;
         $settings->{Client}->{ID} = $client->id;
+        if ( defined $exactWas ) { $settings->{Client}->{ExactLength} = $exactWas }
+        else                     { delete $settings->{Client}->{ExactLength} }
         $settings->{PresetName} = $presetName;
         # Write the updated settings back to the file
         if (open(my $fh_out, '>', $myJSONFile)) {

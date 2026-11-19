@@ -18,8 +18,8 @@ import (
 	"time"
 
 	//	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/foxAdapterDecoder"
-	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/foxDSDReader"
 	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/foxWavReader"
+	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/gipsyDSDReader"
 	"github.com/Foxenfurter/foxAudioLib/foxLog"
 
 	//"github.com/Foxenfurter/foxAudioLib/foxLog"
@@ -49,7 +49,7 @@ type AudioDecoder struct {
 	TimeStamp       string
 
 	// DSD (SqueezeDSP fork): a DSF or DSDIFF file decoded to SampleRate here
-	DSDReader *foxDSDReader.Reader
+	DSDReader *gipsyDSDReader.Reader
 	EndTime   time.Duration // where the decode ends, from the file's start; 0 = to the end
 	DSDCutoff float64       // Hz; 0 = none
 	DSDGain   float64       // dB
@@ -240,7 +240,7 @@ func (myDecoder *AudioDecoder) initDSD() error {
 	if myDecoder.Filename == "" || myDecoder.Filename == "-" {
 		return errors.New(packageName + ": DSD needs a file, not stdin")
 	}
-	r := &foxDSDReader.Reader{
+	r := &gipsyDSDReader.Reader{
 		Filename:        filepath.ToSlash(filepath.Clean(myDecoder.Filename)),
 		OutRate:         myDecoder.SampleRate,
 		Cutoff:          myDecoder.DSDCutoff,

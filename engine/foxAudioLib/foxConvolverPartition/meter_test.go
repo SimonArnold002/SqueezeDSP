@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
+	"github.com/Foxenfurter/foxAudioLib/gipsySpeed"
 )
 
 // The meter (SqueezeDSP fork) counts the convolution, not the waits either side: 8 blocks of 4096 frames through a
@@ -30,11 +30,11 @@ func TestMeterLeavesOutWaits(t *testing.T) {
 		return audio, busy, time.Since(t0)
 	}
 	pc := NewPartitionedConvolver(lowpass(96000, 23000, 4801), 96000)
-	pc.Meter = &foxSpeed.Meter{Name: "convolver 1", Rate: 96000}
+	pc.Meter = &gipsySpeed.Meter{Name: "convolver 1", Rate: 96000}
 	if audio, busy, wall := run(pc, 8); audio != 8*4096/96000.0 || wall < 350*time.Millisecond || busy <= 0 || busy > 0.1 {
 		t.Fatalf("audio %.4f s, busy %.4f s over %v: want every frame and the work alone", audio, busy, wall)
 	}
-	none := &PartitionedConvolver{Meter: &foxSpeed.Meter{Name: "convolver 1", Rate: 96000}}
+	none := &PartitionedConvolver{Meter: &gipsySpeed.Meter{Name: "convolver 1", Rate: 96000}}
 	if audio, busy, _ := run(none, 2); audio != 2*4096/96000.0 || busy != 0 {
 		t.Fatalf("nothing to convolve: audio %.4f s, busy %.4f s, want the frames and no work", audio, busy)
 	}

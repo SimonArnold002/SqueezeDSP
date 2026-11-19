@@ -590,6 +590,27 @@ input[type="button"] {
   border: 2px solid red !important;
 }
 
+/* LMS's "Prefer native format" on: red, above everything (index.html #sqdsp-native) */
+.sqdsp-native {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 8px 0;
+  padding: 10px 14px;
+  background-color: #c62828;
+  color: white;
+  font-weight: bold;
+  border-radius: 6px;
+}
+.sqdsp-native-t { flex: 1 1 220px; }
+.sqdsp-native button {
+  background-color: transparent !important;
+  color: white !important;
+  border: 2px solid white !important;
+  font-weight: bold;
+}
+
 .button-green {
   background-color: rgb(158, 232, 195) !important;
   color: black !important;
@@ -1578,6 +1599,7 @@ tr.sqdsp-group td { padding-top: 10px; padding-bottom: 2px; }
 tr.sqdsp-overridden > td.rowTitle, tr.sqdsp-overridden > td.rowBody { opacity: 0.55; }
 .sqdsp-pane.sqdsp-dimmed > *:not(.sqdsp-dspoff):not(.section-body-table) { opacity: 0.6; }
 .sqdsp-pane.sqdsp-dimmed > .section-body-table:not(.sqdsp-dspoff) tr:not(.sqdsp-dspoff) { opacity: 0.6; }
+#control_ExactLength.sqdsp-dimmed > td { opacity: 0.6; }
 /* a choice this player cannot take (the reason on its title): faded and inert, as on the SqueezeDSP page */
 .filter-group .filter-type:has(input[type="radio"]:disabled) { opacity: 0.4; cursor: default; }
 .filter-group .filter-type:has(input[type="radio"]:disabled:not(:checked)):hover {

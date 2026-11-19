@@ -1,70 +1,28 @@
 package Plugins::SqueezeDSP::WavLength;
-# PCM mode's WAV header states the length still to play (ledger THE WAV LENGTH IS STATED).
+# A stream's header states its length (ledger THE WAV LENGTH IS STATED, and the exact-length round,
+# docs/exact-length-plan.md).
 #
-# Every PCM rule ends in a WAV written into a pipe: by the engine, or by sox where it takes a track
-# down to the player's max (the D rule). Into a pipe neither can go back to fill its sizes in, so a
-# renderer that takes a track's length from the header - the Platin Hub - showed nonsense.
-#
-# The length is LMS's for the track less the seek point (a seek through the rule; after a byte seek the
-# whole length: seconds below), PLUS A SECOND. Squeezelite stops at a stated
-# size or at the end of the stream, whichever comes first (pcm.c:207), so a size a little long ends
-# where the stream does, while a short one would cut the track - and LMS's durations are rounded. With
-# no length known (a radio stream) the header says "unknown", as before.
-#
-# At stream start the wrap of tokenizeConvertCommand2 (Upsample.pm) hands our WAV rules here, known
-# from LMS's own transcoder: wav is the stream format it chose, and the rule runs our engine (its
-# [SqueezeDSP] tag, by which Configuration.pm and Status.pm know our rules too).
-# - The engine is the last stage (every rule but D): it is told the length (--wavlength, our engine
-#   build, engine/README.md) and writes it in its own header. No other process.
-# - sox follows the engine (the D rule): sox writes "unknown" beside a RIFF size of 72 whatever it is
-#   told (ledger SOX CANNOT STATE A WAV LENGTH), so a filter is added as the last stage: the Perl LMS
-#   runs on, rewriting only the header's size fields (RIFF, data, and a fact chunk's sample count) from
-#   the rate in its own fmt. The audio passes byte for byte. No Perl (Windows LMS is one executable):
-#   the header as sox wrote it.
-# Not our WAV rule, or any error: the command exactly as LMS built it.
+# Every WAV and DSF rule of ours ends with the engine writing the stream (a D rule too since the round's step 3c: the
+# engine takes a track down to the player's max itself; until then sox did, after it, and a Perl filter after sox
+# rewrote its header). At stream start the wrap of tokenizeConvertCommand2 (Upsample.pm) hands every command here:
+# - where the frames the engine's input carries can be known (a local FLAC, MP3, APE, ALAC; a remote FLAC from its
+#   start: inSamples, remoteFlacHeader below), the engine is told them (--insamples) and its header states the stream's
+#   true length;
+# - otherwise LMS's length for the track less the seek point (a seek through the rule; after a byte seek the whole
+#   length: seconds below), PLUS A SECOND (--wavlength). Squeezelite stops at a stated size or at the end of the
+#   stream, whichever comes first (pcm.c:207), so a size a little long ends where the stream does, while a short one
+#   would cut the track - and LMS's durations are rounded. With no length known (a radio stream) a WAV says
+#   "unknown", as before; a DSF a day (it has no "unknown").
+# Our rules are known from LMS's own transcoder: wav or dsf is the stream format it chose, and the rule runs our engine
+# (its [SqueezeDSP] tag, by which Configuration.pm and Status.pm know our rules too). Not ours, or any error: the
+# command exactly as LMS built it.
 use strict;
-use Config;
-use File::Spec;
 
 use constant MARGIN => 1;
-# A DSF states its length before its data and has no "unknown" (foxDSDEncoder refuses to write one), so a stream LMS
+# A DSF states its length before its data and has no "unknown" (gipsyDSDEncoder refuses to write one), so a stream LMS
 # knows no length for (a radio station) is stated as a day: an upper bound like the rest, which the stream never
-# reaches; the engine ends the stream with its input (foxDSDEncoder Bounded).
+# reaches; the engine ends the stream with its input (gipsyDSDEncoder Bounded).
 use constant DSF_UNKNOWN => 86400;
-
-# The filter, run as `perl -e '<this>' <seconds>`. It contains no single quote (it goes inside
-# single quotes), no [ ] (LMS's binary brackets) and no $NAME$ pair (LMS's tokens), although it is
-# added after LMS has tokenised the command. It reads the header, up to the data chunk, from a
-# pipe that can hand it over in any pieces; anything that is not a RIFF/WAVE header passes as it is.
-my $FILTER = join ' ',
-    'binmode STDIN; binmode STDOUT; my $s = shift || 0; my $h = "";',
-    'sub put { my $x = shift; my $o = 0; while ($o < length $x) { my $w = syswrite(STDOUT, $x, length($x) - $o, $o); exit 0 unless $w; $o += $w } }',
-    'while (length($h) < 8192) { my $n = sysread(STDIN, $h, 8192 - length($h), length($h)); last unless $n; my $d = index($h, "data"); last if $d >= 12 && length($h) >= $d + 8 }',
-    'if (substr($h, 0, 4) eq "RIFF" && substr($h, 8, 4) eq "WAVE") {',
-    'my ($p, $br, $al, $fa) = (12, 0, 0, 0);',
-    'while ($p + 8 <= length $h) {',
-    'my ($id, $len) = (substr($h, $p, 4), unpack("V", substr($h, $p + 4, 4)));',
-    '($br, $al) = unpack("Vv", substr($h, $p + 16, 6)) if $id eq "fmt " && $p + 22 <= length $h;',
-    '$fa = $p + 8 if $id eq "fact" && $len >= 4 && $p + 12 <= length $h;',
-    'if ($id eq "data") {',
-    'my ($d, $r, $f) = (0xFFFFFFFF, 0xFFFFFFFF, 0);',
-    'if ($s > 0 && $br && $al) { my $n = int($s * $br / $al) * $al; ($d, $r, $f) = ($n, $p + $n, $n / $al) if $p + 8 + $n <= 0xFFFFFFFF }',
-    'substr($h, $p + 4, 4) = pack("V", $d); substr($h, 4, 4) = pack("V", $r); substr($h, $fa, 4) = pack("V", $f) if $fa; last }',
-    'last if $len == 0xFFFFFFFF; $p += 8 + $len + ($len % 2) } }',
-    'put($h); while (1) { my $n = sysread(STDIN, my $b, 65536); last unless $n; put($b) }';
-
-sub filter { return $FILTER }
-
-# The Perl LMS itself runs on: on Linux and macOS a perl executable. $^X is what perl was started
-# as - absolute when a script's #! line started it (LMS's launchers), but only "perl" when it was
-# found on the PATH - so a relative one is replaced by the path perl was installed at. Windows LMS
-# is a compiled executable with no perl beside it, so there the header stays as the engine wrote it.
-sub perl {
-    return undef if main::ISWINDOWS;
-    my $p = $^X;
-    $p = $Config{perlpath} if defined $p && !File::Spec->file_name_is_absolute($p);
-    return ( defined $p && $p =~ m{perl[^/\\]*$}i && -x $p ) ? $p : undef;
-}
 
 # The seconds to state: the track's length less where this stream starts, plus MARGIN; 0 when LMS
 # does not know the length. The song being opened is already the player's streaming song when LMS
@@ -96,13 +54,238 @@ sub ours {
     return index( $t->{command} // '', $tag ) >= 0 ? 1 : 0;
 }
 
-# State the length in one of our WAV commands; anything else as it came. The engine's own WAV ends the
-# rule when --formatout=WAV is the command's last argument (TemplateConfig.pm template_WAV); there it
-# gets --wavlength. Otherwise sox writes the WAV and the filter goes after it, before LMS's own ' & |'
-# suffix (added for a command LMS does not feed).
+# ---- THE EXACT LENGTH ROUND, step 3 (docs/exact-length-plan.md): the frames the engine's input will carry -------------
+# Where it can be known at the stream's start, from LMS's view of the track and the file itself, the engine is told it
+# (--insamples=N), or told that its input's WAV header states it (--insamples=header), and its own header then states
+# the stream's true length (engine length.go). Elsewhere nothing is added: the header as before.
+# - FLAC, a local file: STREAMINFO's total, less where flac starts and stops for $START$ / $END$ (--skip=%t,
+#   --until=%v: LMS's m:ss.ff; flac takes int(seconds x rate), 960 of 960 exact at eight rates, t/length/flac_skip.py).
+#   Raw, as the rule has it: LMS's flac 1.3.4 writes NO WAV at all for over 4 GB of PCM (measured 2026-11-15).
+# - MP3, a local file from its start: the LAME tag's frames x 1152 (576 below 32 kHz) less delay + 529 and padding -
+#   529, as lame's decoder trims (get_audio.c:400-403; equal to its output on two of the rig's files,
+#   t/length/mp3_decoders.py). No LAME tag, or a byte seek: not known.
+# - APE (mac) and ALAC (faad on an MP4 from its start): the decoder's WAV header states it (measured); faad on AAC, or
+#   from a start or to an end, does not (t/length/decoder_counts.py).
+# - WAV, AIFF, DSF, DFF the engine reads itself: it knows; nothing added.
+# - FLAC, a remote stream from its start (Qobuz; step 3b): its count is in its STREAMINFO, which only flac sees, so flac
+#   writes a WAV header (its form without --force-raw-format) and the engine reads the format and the count from it
+#   (--insamples=header); the same audio as the raw form, byte for byte (bench 2026-11-15). Only while LMS's length x
+#   rate x channels x depth stays well under 4 GB: past it LMS's flac 1.3.4 writes nothing at all. A resume or seek
+#   reaches flac as frames with no STREAMINFO (ledger A RESUMED FLAC STREAM HAS NO STREAMINFO): raw, as before.
+# A byte seek (seekdata with no start through the rule) and every other remote stream: not known.
+
+# a WAV's largest data size, less room for LMS's length being whole seconds (a Qobuz track's) and its view of the rate
+use constant WAV_ROOM => 4294967295 - 64 * 1024 * 1024;
+
+# the remote FLAC rule's raw form, as LMS tokenises it: flac's raw flags, and the engine's description of the PCM
+my $FLAC_RAW   = ' --force-raw-format --endian=little --sign=signed';
+my $ENGINE_RAW = qr/ --formatin=PCM --be=false --bitsin=\d+ --samplerate=\d+ --channels=\d+/;
+
+# a remote FLAC from its start in flac's WAV-header form, or nothing
+sub remoteFlacHeader {
+    my ( $command, $t, $fullpath ) = @_;
+    return unless _engineRule($t) && ( $t->{profile} // '' ) =~ /^flc-/ && ( $t->{streamMode} // '' ) eq 'I';
+    return if !defined $fullpath || $fullpath =~ m{^file://} || $fullpath =~ /#[^-#]+-[^-#]+$/ || $t->{start};
+    my $song = _song($t) or return;
+    return if eval { $song->seekdata };
+    my $dur  = eval { $song->duration } || 0;
+    my ( $rate, $bits, $ch ) = ( $t->{sampleRate} || 0, $t->{sampleSize} || 0, $t->{channels} || 0 );
+    return unless $dur > 0 && $rate > 0 && $bits > 0 && $ch > 0;
+    return unless ( $dur + 1 ) * $rate * $ch * int( ( $bits + 7 ) / 8 ) < WAV_ROOM;
+    my $c = $command;
+    my $at = index( $c, $FLAC_RAW );
+    return unless $at >= 0 && index( $c, $FLAC_RAW, $at + 1 ) < 0;
+    substr( $c, $at, length $FLAC_RAW ) = '';
+    $c =~ s/$ENGINE_RAW/ --insamples=header/ or return;
+    return $c;
+}
+sub _engineRule {
+    my $t = shift;
+    my $tag = '[' . ( $Plugins::SqueezeDSP::Plugin::convolver || 'SqueezeDSP' ) . ']';
+    return ref $t eq 'HASH' && index( $t->{command} // '', $tag ) >= 0;
+}
+
+sub _song {
+    my $t      = shift || {};
+    my $client = Slim::Player::Client::getClient( $t->{clientid} ) or return;
+    my $c      = $client->controller or return;
+    return $c->streamingSong;
+}
+
+sub _path {
+    my ( $filepath, $url ) = @_;
+    return $filepath if defined $filepath && $filepath ne '-' && $filepath ne '';
+    return unless defined $url && $url =~ m{^file://};
+    ( my $u = $url ) =~ s/#[^#]*$//;
+    return Slim::Utils::Misc::pathFromFileURL($u);
+}
+
+# an ID3v2 tag at the file's start (a FLAC may carry one too): the bytes to its end
+sub _id3 {
+    my $fh = shift;
+    seek( $fh, 0, 0 ) or return 0;
+    read( $fh, my $h, 10 ) == 10 or return 0;
+    return 0 unless substr( $h, 0, 3 ) eq 'ID3';
+    my @b = unpack( 'C4', substr( $h, 6, 4 ) );
+    return 10 + ( ( $b[0] << 21 ) | ( $b[1] << 14 ) | ( $b[2] << 7 ) | $b[3] ) + ( ( ord( substr( $h, 5, 1 ) ) & 0x10 ) ? 10 : 0 );
+}
+
+# a FLAC file's STREAMINFO: (rate, total frames), or nothing
+sub flacInfo {
+    my $path = shift;
+    open( my $fh, '<:raw', $path ) or return;
+    my $off = _id3($fh);
+    seek( $fh, $off, 0 ) or return;
+    read( $fh, my $b, 42 ) == 42 or return;
+    return unless substr( $b, 0, 4 ) eq 'fLaC' && ( ord( substr( $b, 4, 1 ) ) & 0x7F ) == 0;
+    my ( $hi, $lo ) = unpack( 'NN', substr( $b, 18, 8 ) );
+    my $rate = $hi >> 12;
+    return unless $rate;
+    return ( $rate, ( $hi & 0xF ) * 4294967296 + $lo );
+}
+
+# where LMS's flac starts or stops for a time LMS hands it as %t / %v
+sub flacAt {
+    my ( $secs, $rate ) = @_;
+    my ( $m, $s ) = split /:/, Slim::Utils::DateTime::fracSecToMinSec($secs);
+    return int( ( $m * 60 + $s ) * $rate );
+}
+
+# an MP3 file's LAME tag: the frames lame's decoder sends from the file's start, or nothing
+sub mp3Frames {
+    my $path = shift;
+    open( my $fh, '<:raw', $path ) or return;
+    my $off = _id3($fh);
+    seek( $fh, $off, 0 ) or return;
+    read( $fh, my $b, 4096 ) > 200 or return;
+    my $p = index( $b, "\xFF" );
+    while ( $p >= 0 && $p + 4 <= length $b ) {
+        my $h = unpack( 'N', substr( $b, $p, 4 ) );
+        last if ( $h >> 21 ) == 0x7FF && ( ( $h >> 17 ) & 3 ) == 1;    # a frame sync, layer III
+        $p = index( $b, "\xFF", $p + 1 );
+    }
+    return if $p < 0 || $p + 4 > length $b;
+    my $h    = unpack( 'N', substr( $b, $p, 4 ) );
+    my $mpeg1 = ( ( $h >> 19 ) & 3 ) == 3;
+    my $mono  = ( ( $h >> 6 ) & 3 ) == 3;
+    my $x     = $p + 4 + ( $mpeg1 ? ( $mono ? 17 : 32 ) : ( $mono ? 9 : 17 ) );
+    return unless substr( $b, $x, 4 ) =~ /^(?:Xing|Info)$/;
+    my $flags = unpack( 'N', substr( $b, $x + 4, 4 ) );
+    return unless $flags & 1;
+    my $frames = unpack( 'N', substr( $b, $x + 8, 4 ) );
+    my $q = $x + 12 + ( ( $flags & 2 ) ? 4 : 0 ) + ( ( $flags & 4 ) ? 100 : 0 ) + ( ( $flags & 8 ) ? 4 : 0 );
+    return unless $q + 24 <= length $b && substr( $b, $q, 4 ) eq 'LAME';
+    my @d = unpack( 'C3', substr( $b, $q + 21, 3 ) );
+    my $delay   = ( $d[0] << 4 ) | ( $d[1] >> 4 );
+    my $padding = ( ( $d[1] & 0xF ) << 8 ) | $d[2];
+    my $n = $frames * ( $mpeg1 ? 1152 : 576 ) - ( $delay + 529 ) - ( $padding > 529 ? $padding - 529 : 0 );
+    return $n > 0 ? $n : undef;
+}
+
+# the count for this stream: frames, 'header', or nothing
+sub inSamples {
+    my ( $t, $filepath, $fullpath ) = @_;
+    return unless _engineRule($t);
+    my ($type) = ( $t->{profile} // '' ) =~ /^([^-]+)-/ or return;
+    my $url = $fullpath // '';
+    return unless $url =~ m{^file://};
+    my ( $cueA, $cueB ) = $url =~ /#([^-#]+)-([^-#]+)$/;
+    my $song = _song($t);
+    my $seek = $song ? eval { $song->seekdata } : undef;
+    return if $seek && !$t->{start};                     # a byte seek: where it lands is not known exactly
+    my $start = ( $cueA || 0 ) + ( $t->{start} || 0 );
+    my $path = _path( $filepath, $url ) or return;
+    return unless -f $path;
+    if ( $type eq 'flc' ) {
+        my ( $rate, $total ) = flacInfo($path) or return;
+        return unless $total > 0;
+        my $from = $start ? flacAt( $start, $rate ) : 0;
+        my $to   = $cueB  ? flacAt( $cueB, $rate )  : $total;
+        $to = $total if $to > $total;
+        return $to > $from ? $to - $from : undef;
+    }
+    return if $start || $cueB;                             # every other type: from the file's start to its end only
+    return mp3Frames($path) if $type eq 'mp3';
+    return 'header' if $type =~ /^(?:ape|alc|alcx)$/;
+    return;
+}
+
+# ---- step 4, the exact-length contract (docs/exact-length-plan.md part B) ------------------------------------------------
+# A player with our "Exact track length" option on (Gapless::exactLength: one that needs a stream's true length before
+# its first byte). For it:
+# - a remote FLAC whose count flac cannot state (a resume or a seek reaches it as frames only; from its start past 4 GB,
+#   or with no length LMS knows: raw) has the engine read it from the stream URL (--flacseek=the byte LMS's request
+#   starts at, its Range: STREAMINFO's total less the first frame's number, engine flacseek.go). Only for it: the two
+#   reads wait at the stream's start, which a player that stops at the stream's end does not need;
+# - FLAC out states the true total in STREAMINFO: LMS's flac without --ignore-chunk-sizes copies the engine's WAV header
+#   (measured 2026-11-15, t/length/flac_encode.py), so only where that header is exact by construction: --insamples=N
+#   (the plugin's own count, from the file) or a DSD file the engine reads, the WAV under 4 GB, a second or more of it.
+#   Elsewhere the flag stays: an "unknown" header gives a bogus total (715,827,882 frames), a data size of 0 no stream.
+sub exact {
+    my $t = shift;
+    return 0 unless ref $t eq 'HASH';
+    return Plugins::SqueezeDSP::Gapless::exactLength( Slim::Player::Client::getClient( $t->{clientid} ) );
+}
+
+# the remote FLAC rule in its raw form, for a player that needs the count: --flacseek, or nothing
+sub flacSeek {
+    my ( $command, $t, $fullpath ) = @_;
+    return unless _engineRule($t) && ( $t->{profile} // '' ) =~ /^flc-/ && ( $t->{streamMode} // '' ) eq 'I';
+    return unless defined $fullpath && $fullpath =~ m{^https?://}i && $fullpath !~ /#[^-#]+-[^-#]+$/;
+    return if $command =~ /--insamples=/ || $command !~ $ENGINE_RAW;
+    return unless exact($t);
+    my $song = _song($t) or return;
+    my $sd = eval { $song->seekdata } || {};
+    # LMS's own Range start (Slim::Player::Protocols::HTTP::requestString): a resume's restartOffset, else the seek's
+    my $first = $sd->{restartOffset} || int( $sd->{sourceStreamOffset} || 0 );
+    ( my $c = $command ) =~ s/(--bitsout=24)(?= |$)/$1 --flacseek=$first/ or return;
+    return $c;
+}
+
+# FLAC out without --ignore-chunk-sizes where the engine's count is exact, for a player that needs it; or nothing
+my $FLAC_OUT = qr/(--formatout=WAV \|[^|]* -cs -0 --totally-silent) --ignore-chunk-sizes(?= -)/;
+sub flacTotal {
+    my ( $command, $t, $n ) = @_;
+    return unless ( $t->{streamformat} // '' ) eq 'flc' && _engineRule($t);
+    return unless ( defined $n && $n =~ /^\d+$/ && $n > 0 ) || $command =~ /--formatin=DSD --input /;
+    return unless exact($t);
+    my $song = _song($t) or return;
+    my $dur  = eval { $song->duration } || 0;
+    my ($rate) = $command =~ /--upsample=(\d+)/;
+    ($rate) = $command =~ /--samplerate=(\d+)/ unless $rate;
+    $rate ||= $t->{sampleRate} || 0;
+    my $ch = $t->{channels} || 2;
+    return unless $dur >= 1 && $rate > 0 && ( $dur + 1 ) * $rate * $ch * 3 < WAV_ROOM;
+    my @at = $command =~ /$FLAC_OUT/g;
+    return unless @at == 1;
+    ( my $c = $command ) =~ s/$FLAC_OUT/$1/;
+    return $c;
+}
+
+# --insamples into one of our commands, among the engine's own arguments (after --bitsout=24, which every rule gives it)
+sub withCount {
+    my ( $command, $n ) = @_;
+    return $command unless defined $n;
+    ( my $c = $command ) =~ s/(--bitsout=24)(?= |$)/$1 --insamples=$n/ or return $command;
+    return $c;
+}
+
+# State the length in one of our WAV or DSF commands; anything else as it came. The engine writes the WAV and ends
+# the rule (--formatout=WAV its last argument: TemplateConfig.pm template_WAV, the D rule included); it gets
+# --wavlength before LMS's own ' & |' suffix (added for a command LMS does not feed).
 sub apply {
-    my ( $command, $t ) = @_;
-    return $command unless defined $command && ours($t);
+    my ( $command, $t, $filepath, $fullpath ) = @_;
+    return $command unless defined $command;
+    my $n = eval { inSamples( $t, $filepath, $fullpath ) };
+    $command = withCount( $command, $n ) if defined $n;
+    my $remote = eval { remoteFlacHeader( $command, $t, $fullpath ) };
+    $command = $remote if defined $remote;
+    # step 4, a player that needs the true length first
+    my $seek = eval { flacSeek( $command, $t, $fullpath ) };
+    $command = $seek if defined $seek;
+    my $total = eval { flacTotal( $command, $t, $n ) };
+    $command = $total if defined $total;
+    return $command unless ours($t);
     my $secs = eval { seconds($t) } || 0;
     my ( $body, $tail ) = $command =~ /^(.*?)(\s*&?\s*\|?\s*)$/s;
     if ( $t->{streamformat} eq 'dsf' ) {
@@ -111,12 +294,8 @@ sub apply {
         return $command unless $body =~ /--formatout=DSF --dsdrate=\S+ --dsdmax=\d+$/ && $body !~ /--formatin=DSD --input /;
         return sprintf( '%s --wavlength=%.3f%s', $body, $secs > 0 ? $secs : DSF_UNKNOWN, $tail );
     }
-    if ( $body =~ /--formatout=WAV$/ ) {
-        return $command unless $secs > 0;
-        return sprintf( '%s --wavlength=%.3f%s', $body, $secs, $tail );
-    }
-    my $perl = perl() or return $command;
-    return sprintf( q{%s | "%s" -e '%s' %.3f%s}, $body, $perl, $FILTER, $secs, $tail );
+    return $command unless $body =~ /--formatout=WAV$/ && $secs > 0;
+    return sprintf( '%s --wavlength=%.3f%s', $body, $secs, $tail );
 }
 
 1;

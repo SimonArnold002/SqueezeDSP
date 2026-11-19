@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxAdapterEncoder"
-	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxDSDEncoder"
 	foxWavEncoder "github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxWavEncoder"
+	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/gipsyDSDEncoder"
 	"github.com/Foxenfurter/foxAudioLib/foxLog"
-	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
+	"github.com/Foxenfurter/foxAudioLib/gipsySpeed"
 )
 
 const packageName = "foxAudioEncoder"
@@ -46,22 +46,24 @@ type AudioEncoder struct {
 	// stream carries, which DSF states before the data.
 	DSDRate    int
 	DSDKind    string
-	DSDSource  string // "dsd" or "pcm" (foxDSDEncoder.Encoder.Source)
+	DSDSource  string // "dsd" or "pcm" (gipsyDSDEncoder.Encoder.Source)
 	DSDGainDB  float64
 	Frames     int64
-	Bounded    bool // Frames an upper bound (foxDSDEncoder.Encoder.Bounded)
-	DSDEncoder *foxDSDEncoder.Encoder
+	Bounded    bool  // Frames an upper bound (gipsyDSDEncoder.Encoder.Bounded)
+	DSDCount   int64 // the exact DSD samples a channel (gipsyDSDEncoder.Encoder.Count); 0: Frames*L
+	DSDHeldAt  bool  // the stream closes held at exactly DSDCount (gipsyDSDEncoder.Encoder.HeldCount)
+	DSDEncoder *gipsyDSDEncoder.Encoder
 	// EndHold (SqueezeDSP fork, the gapless round): asked at the input's end; true when the next track goes on from
-	// this one's state, so DSF closes held (foxDSDEncoder CloseHeld) instead of flushing
+	// this one's state, so DSF closes held (gipsyDSDEncoder CloseHeld) instead of flushing
 	EndHold func() bool
 
-	// Meter (SqueezeDSP fork): the encoding's own time, for the engine's busiest stage (foxSpeed); the writes to stdout,
+	// Meter (SqueezeDSP fork): the encoding's own time, for the engine's busiest stage (gipsySpeed); the writes to stdout,
 	// which wait for the reader (LMS, and so the player), left out. Fill: the engine's speed, the audio written to stdout
-	// and the time taken while the reader takes everything (foxSpeed.Fill). Neither with the adapter: its EncodeData
+	// and the time taken while the reader takes everything (gipsySpeed.Fill). Neither with the adapter: its EncodeData
 	// feeds an encoder process and waits on it, so the engine reports no speed then.
-	Meter *foxSpeed.Meter
-	Fill  *foxSpeed.Fill
-	// Out (SqueezeDSP fork, 0.1.72.46): where the writes to stdout go when set, the engine's lead (foxSpeed.Lead)
+	Meter *gipsySpeed.Meter
+	Fill  *gipsySpeed.Fill
+	// Out (SqueezeDSP fork, 0.1.72.46): where the writes to stdout go when set, the engine's lead (gipsySpeed.Lead)
 	Out io.Writer
 }
 
@@ -128,12 +130,14 @@ func (myEncoder *AudioEncoder) Initialise() error {
 		//Create empty header - no header for PCM
 		myEncoder.debug(fmt.Sprintf(packageName + ":" + functionName + "  PCM Output..."))
 	case "DSF":
-		d := &foxDSDEncoder.Encoder{
+		d := &gipsyDSDEncoder.Encoder{
 			DSDRate:     myEncoder.DSDRate,
 			InRate:      myEncoder.SampleRate,
 			NumChannels: myEncoder.NumChannels,
 			Frames:      myEncoder.Frames,
 			Bounded:     myEncoder.Bounded,
+			Count:       myEncoder.DSDCount,
+			HeldCount:   myEncoder.DSDHeldAt,
 			Kind:        myEncoder.DSDKind,
 			Source:      myEncoder.DSDSource,
 			GainDB:      myEncoder.DSDGainDB,

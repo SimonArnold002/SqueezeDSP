@@ -52,6 +52,13 @@ print ( $myversion );
 </span>
 </div>
 
+<!-- LMS's "Prefer native format" on: red, above everything, with a button that turns it off (LocalSetupNative) -->
+<div id="sqdsp-native" class="sqdsp-native" style="display: none;">
+    <span class="sqdsp-native-t">[% "PLUGIN_SQUEEZEDSP_PREFER_NATIVE" | string %]</span>
+    <button class="sqdsp-click button" type="button" id="sqdsp-native-off"
+            onclick="SqueezeDSPPreferNativeOff();">[% "PLUGIN_SQUEEZEDSP_PREFER_NATIVE_OFF" | string %]</button>
+</div>
+
 <!-- Hidden string constants for JS -->
 <DIV style="display : none;" id="TEST REST">
     <Input id="Freq_Desc"       readonly value='[% "PLUGIN_SQUEEZEDSP_FREQ"           | string %]'>
@@ -111,6 +118,26 @@ print ( $myversion );
                     id="btn_Apply" value="Apply"
                     onclick="SqueezeDSPSaveAll(); DisplayAlert('All Settings', 'Applied', 2000);">Apply</button>
         </TD>
+    </TR>
+    <!-- Exact track length: the player's own (Simon 2026-11-15), dimmed while the DSP is off (LocalSetupDspOff) -->
+    <TR id="control_ExactLength" class="row-header">
+        <TD class="rowTitle">
+            <div class="tooltip">
+                <label class="infoTitle">[% "PLUGIN_SQUEEZEDSP_EXACTLENGTH" | string %]</label>
+                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_EXACTLENGTH_HELP" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowBody">
+            <div class="checkbox-row">
+                <div class="checkbox-group">
+                    <input class="Check" type="checkbox"
+                           name="val_ExactLength" id="ExactLength" value="0"
+                           onclick="SwitchCheckbox(this); NewFieldValue('ExactLength', this, false);">
+                    <label for="ExactLength" class="Toggle">Toggle</label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
     </TR>
 </TABLE>
 
@@ -686,6 +713,7 @@ print ( $myversion );
                                onchange="NewFieldValue('OutputFormat', this, false); LocalSetupOutput(); LocalSetupUpsample();">
                         <span>PCM (WAV 24-bit)</span>
                     </label>
+                    <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_OUTPUT_WAV_HELP" | string %]</span>
                 </div>
             </div>
         </TD>

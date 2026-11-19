@@ -18,6 +18,7 @@ function InitialiseData()
     {
     return {
         Bypass: 1,
+        ExactLength: 0,         // "Exact track length": 1 for a player that needs a stream's true length first (Gapless.pm)
         OutputFormat: "FLAC",   // or "PCM": 24-bit WAV with its header, for a player that reads one
         Upsample: "off",        // the Sample Rate Converter: "on" (PCM: the engine resamples before the DSP; Upsample.pm), or "dsd"
         UpsamplePCMFilterCD: "short-int",    // PCM's filter for a source at 48 kHz and under: one of Upsample.pm's @FILTERS
@@ -402,6 +403,20 @@ function SqueezeDSPSaveEQBand(myBand, myFreq, myGain, myQ)
 
 // Fetch current settings from server
 // Modified processing function
+// The red bar's button: LMS's own `pref` command (no player) turns "Prefer native format" off, then the settings are read
+// again, so the bar goes once the server says it is off (sqdsp_core.js LocalSetupNative)
+function SqueezeDSPPreferNativeOff() {
+    const btn = document.getElementById('sqdsp-native-off');
+    if (btn) btn.disabled = true;
+    const again = () => SqueezeDSPFetchCurrentSettings(LocalSetupAll);
+    new Ajax.Request('/jsonrpc.js', {
+        method: 'post',
+        postBody: Object.toJSON({ id: 1, method: 'slim.request', params: ['', ['pref', 'prioritizeNative', '0']] }),
+        onSuccess: again,
+        onFailure: again
+    });
+}
+
 // Fetch current settings from server
 function SqueezeDSPFetchCurrentSettings(callback) {
     new Ajax.Request('/jsonrpc.js', {
@@ -434,7 +449,9 @@ function SqueezeDSPFetchCurrentSettings(callback) {
                 // native DSD out: a player that lists dsf itself, its output not a reduced stream (an older server: none)
                 dsdOutOk: Number(data.result.dsd_out_ok) === 1,
                 // the Sample Rate Converter to DSD: DSD out as above, and the stream-start hook (an older server: none)
-                upDsdOk: Number(data.result.up_dsd_ok) === 1
+                upDsdOk: Number(data.result.up_dsd_ok) === 1,
+                // LMS's "Prefer native format", which SqueezeDSP needs off (an older server: none)
+                preferNative: Number(data.result.prefer_native) === 1
             };
 
             try {

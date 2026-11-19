@@ -64,6 +64,7 @@ function LocalUpdateSettings() {
     LocalDisplayVals();    
     
     myRadio = LocalSetupToggle('DSP', SqueezeDSPData.Client.Bypass, true);
+    LocalSetupToggle('ExactLength', String(replaceNull(SqueezeDSPData.Client.ExactLength, 0)) === '1' ? 1 : 0);
     LocalSetupAll();
 
     myRadio = LocalSetupToggle('Loudness', replaceNull(SqueezeDSPData.Client.Loudness.enabled,0));
@@ -190,17 +191,19 @@ const UPSAMPLE_MAX_RATES = [768000, 384000, 192000, 96000];
 const DSD_RATE_NAMES = { 2822400: 'DSD64', 5644800: 'DSD128', 11289600: 'DSD256', 22579200: 'DSD512' };
 // The engine's filters (Upsample.pm @FILTERS; 0.1.72.44, Simon 2026-11-06: "choose the filters from a drop down ... the
 // name, lenght and phase"), in its order: [value, family, length, phase]. Kaiser's values as before, so a stored
-// choice carries over.
+// choice carries over. Each length's phases linear to minimum, the linear-leaning intermediates (80% and 70% linear,
+// 2026-11-15) between.
+const FILTER_PHASES = ['lin', 'int80', 'int70', 'int', 'min'];
 const UPSAMPLE_FILTERS = (() => {
     const out = [];
     [['', 'Kaiser', ['short', 'long', 'xlong']], ['gauss-', 'Gaussian', ['short', 'medium', 'long']],
      ['halfband-', 'Half-band', ['']], ['slow-', 'Slow roll-off', ['']]].forEach(([pre, fam, lens]) =>
-        lens.forEach(l => ['lin', 'int', 'min'].forEach(p => out.push([pre + (l ? l + '-' : '') + p, fam, l, p]))));
+        lens.forEach(l => FILTER_PHASES.forEach(p => out.push([pre + (l ? l + '-' : '') + p, fam, l, p]))));
     out.push(['nonring', 'Non-ringing', '', '']);
     return out;
 })();
 const FILTER_LENGTH_NAMES = { short: 'Short', medium: 'Medium', long: 'Long', xlong: 'Extra-long' };
-const FILTER_PHASE_NAMES = { lin: 'Linear', int: 'Intermediate', min: 'Minimum' };
+const FILTER_PHASE_NAMES = { lin: 'Linear', int80: 'Intermediate 80%', int70: 'Intermediate 70%', int: 'Intermediate', min: 'Minimum' };
 // a filter dropdown's options, grouped by family, each named "Kaiser · Short · Linear"
 function fillFilters(sel) {
     let group = null;
@@ -385,11 +388,23 @@ function LocalSetupDSDOut() {
 
 // Every setup that reads the player's settings and the converter's mode, which each tab's notes follow
 function LocalSetupAll() {
+    LocalSetupNative();
     LocalSetupOutput();
     LocalSetupUpsample();
     LocalSetupDSD();
     LocalSetupDSDOut();
     LocalSetupDspOff();
+}
+
+// LMS's "Prefer native format" on (readclientSettings prefer_native): the red bar at the top, with its button
+// (sqdsp_data.js SqueezeDSPPreferNativeOff); hidden while it is off
+function LocalSetupNative() {
+    const bar = document.getElementById('sqdsp-native');
+    if (!bar) return;
+    const on = !!(typeof SqueezeDSPPlayer !== 'undefined' && SqueezeDSPPlayer && SqueezeDSPPlayer.preferNative);
+    bar.style.display = on ? '' : 'none';
+    const btn = document.getElementById('sqdsp-native-off');
+    if (btn) btn.disabled = false;
 }
 
 // DSP off: what it drives is dimmed (still editable), and each tab of it says so, as on the SqueezeDSP page; the presets
@@ -398,6 +413,8 @@ function LocalSetupDspOff() {
     const on = String(SqueezeDSPData.Client.Bypass) === '0';
     document.querySelectorAll('.sqdsp-pane[data-dsp]').forEach(p => p.classList.toggle('sqdsp-dimmed', !on));
     document.querySelectorAll('.sqdsp-dspoff').forEach(n => { n.style.display = on ? 'none' : ''; });
+    const exact = document.getElementById('control_ExactLength');
+    if (exact) exact.classList.toggle('sqdsp-dimmed', !on);
 }
 
 // The tabs (Simon 2026-11-03, the SqueezeDSP page's, in its order): one pane shown, the last one picked remembered in

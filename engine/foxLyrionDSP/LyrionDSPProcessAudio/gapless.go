@@ -18,6 +18,12 @@
 // last, and the stream ends that much later. With no note (an engine run by hand, or a plugin before this round) the
 // engine does as before.
 //
+// THE EXACT LENGTH ROUND, step 4 (docs/exact-length-plan.md part B): a player that needs a stream's true length before
+// its first byte (UPnP Direct's renderers; its plugin declares it, the plugin's note says "exact=1") cannot have a stream
+// end where the next track's arrival decides, so for it the end is decided at the stream's START, from the note as it is
+// then, and the header states that stream's frames exactly (length.go). A next track removed after the start leaves the
+// held tail in the residual: an engine run with --tail plays it out as a stream of its own, for the renderer to queue.
+//
 // Each decision goes to the log at Info (0.1.72.40; Debug before, which the rig never runs), a few lines a track, so the
 // plugin's log page shows them over HTTP (Page.pm, /squeezedsp/log).
 package LyrionDSPProcessAudio
@@ -42,6 +48,7 @@ type gaplessNote struct {
 	follows   bool
 	this      trackKind
 	next      trackKind
+	exact     bool // the player needs the true length before the first byte: the end is decided at the start
 }
 
 // trackKind: a track's rate, kind ("pcm" or "dsd") and channels, as LMS knows them; zero values: not known
@@ -94,6 +101,8 @@ func readGaplessNote(path string) gaplessNote {
 			n.this = parseKind(v)
 		case "next":
 			n.next = parseKind(v)
+		case "exact":
+			n.exact = v == "1"
 		}
 	}
 	return n
@@ -101,13 +110,13 @@ func readGaplessNote(path string) gaplessNote {
 
 // gaplessState: the engine's part, on the processor
 type gaplessState struct {
-	note      gaplessNote // as read at the start
-	path      string
-	res       *DSPResidualsCache // the last track's residual, read at the start (note mode)
-	carry     bool               // the last track's state is taken: the note says this stream continues and it held
-	endOnce   sync.Once
-	hold      bool  // at the end: every stage keeps what it holds for the next track
-	tailOut   int64 // frames at ProcRate the stages' tails come to at most (the silence the end plays them out with),
+	note    gaplessNote // as read at the start
+	path    string
+	res     *DSPResidualsCache // the last track's residual, read at the start (note mode)
+	carry   bool               // the last track's state is taken: the note says this stream continues and it held
+	endOnce sync.Once
+	hold    bool  // at the end: every stage keeps what it holds for the next track
+	tailOut int64 // frames at ProcRate the stages' tails come to at most (the silence the end plays them out with),
 	// and what the last track's held state brings into this one's start at most
 	tailFrame int64 // the same at the decoder's rate, the silence tailStage sends
 }
@@ -115,24 +124,29 @@ type gaplessState struct {
 // noteMode: the plugin's note governs this stream
 func (ap *AudioProcessor) noteMode() bool { return ap.gapless.note.ok }
 
-// endHold: decided once, when the first stage reaches the input's end, from the note as it is then.
+// endHold: decided once, when the first stage reaches the input's end, from the note as it is then; for a player that
+// needs the true length first (the note's exact), at the stream's start from the note as it was then (lengthStart asks).
 func (ap *AudioProcessor) endHold() bool {
 	ap.gapless.endOnce.Do(func() {
 		if !ap.noteMode() {
 			ap.gapless.hold = true // as before: the convolvers keep their tails for a next track
 			return
 		}
-		n := readGaplessNote(ap.gapless.path)
-		this := n.this
-		if !n.ok {
-			this = ap.gapless.note.this
+		when, n := "the input's end", ap.gapless.note
+		if !n.exact {
+			n = readGaplessNote(ap.gapless.path)
+			if !n.ok {
+				n.this = ap.gapless.note.this
+			}
+		} else {
+			when = "the stream's start (the player needs the true length first)"
 		}
 		// a bypassed stream (the DSP off, our rule still in place for a moment) carries nothing (SaveDSPResiduals), so
-		// it never holds: its stages play out as before
-		ap.gapless.hold = !ap.Config.Bypass && n.ok && n.follows && n.next.sameAs(this)
-		ap.Logger.Info(fmt.Sprintf("%s: the input's end: %s (note: follows %v, this %v, next %v)", packageName,
+		// it never holds: its stages play out as before; nor does a held tail played out on its own (--tail)
+		ap.gapless.hold = !ap.Config.Bypass && !ap.Args.Tail && n.ok && n.follows && n.next.sameAs(n.this)
+		ap.Logger.Info(fmt.Sprintf("%s: %s: %s (note: follows %v, this %v, next %v)", packageName, when,
 			map[bool]string{true: "a track follows, every stage keeps what it holds", false: "nothing follows: every stage plays out"}[ap.gapless.hold],
-			n.follows, this, n.next))
+			n.follows, n.this, n.next))
 	})
 	return ap.gapless.hold
 }
@@ -143,6 +157,11 @@ func (ap *AudioProcessor) gaplessStart() {
 	g := &ap.gapless
 	g.path = filepath.Join(ap.AppSettings.TempDataFolder, "gapless_"+ap.Args.CleanClientID)
 	g.note = readGaplessNote(g.path)
+	if ap.Args.Tail {
+		// a held tail on its own (a next track removed after a stream that held for it): it continues the residual's
+		// track whatever the note says now, nothing follows it, and its length is stated
+		g.note = gaplessNote{ok: true, continues: true, exact: true}
+	}
 	if !g.note.ok {
 		return
 	}
@@ -155,7 +174,8 @@ func (ap *AudioProcessor) gaplessStart() {
 	os.Remove(ap.cachePath) // whatever it held is this stream's or no one's
 	// the last track's state, only for the stream that continues that track: a residual another track left (one the
 	// next did not take, its stream not ours) goes to no one
-	g.carry = g.note.continues && g.res != nil && g.res.Held && (g.note.prev == "" || g.note.prev == g.res.TrackURL)
+	g.carry = g.note.continues && g.res != nil && g.res.Held && (g.note.prev == "" || g.note.prev == g.res.TrackURL) &&
+		(!ap.Args.Tail || g.res.Gate)
 	ap.Logger.Info(fmt.Sprintf("%s: gapless note: continues %v, the last track %s", packageName, g.note.continues,
 		map[bool]string{true: "held its state for this one: taken", false: "left nothing for this one (or this one starts afresh)"}[g.carry]))
 	if g.carry && ap.Upsampler != nil && g.res.Upsampler != nil {

@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder"
-	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/foxDSDReader"
 	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/foxWavReader"
+	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/gipsyDSDReader"
 	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder"
 	foxConvolver "github.com/Foxenfurter/foxAudioLib/foxConvolverPartition"
 	"github.com/Foxenfurter/foxAudioLib/foxLog"
-	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
-	"github.com/Foxenfurter/foxAudioLib/foxUpsampler"
+	"github.com/Foxenfurter/foxAudioLib/gipsySpeed"
+	"github.com/Foxenfurter/foxAudioLib/gipsyUpsampler"
 	"github.com/Foxenfurter/foxLyrionDSP/LyrionDSPSettings"
 )
 
@@ -91,7 +91,7 @@ func TestReportSpeedToWritesAtStop(t *testing.T) {
 
 // Every stage of the route gets its meter, at the rate it runs at: the decoder at its own, the rest at the DSP's.
 func TestAttachMeters(t *testing.T) {
-	u, err := foxUpsampler.New(44100, 705600, 2, foxUpsampler.DefaultCD, foxUpsampler.DefaultHiRes)
+	u, err := gipsyUpsampler.New(44100, 705600, 2, gipsyUpsampler.DefaultCD, gipsyUpsampler.DefaultHiRes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestAttachMeters(t *testing.T) {
 		t.Fatalf("no upsampler: %d meters, the upsampler's %v", len(ms), ap.upMeter)
 	}
 	// a DSD source: our reader decodes (DecodeSamples takes it first), so the meter is its
-	ap.Decoder = &foxAudioDecoder.AudioDecoder{SampleRate: 352800, DSDReader: &foxDSDReader.Reader{}, WavDecoder: &foxWavReader.WavReader{}}
+	ap.Decoder = &foxAudioDecoder.AudioDecoder{SampleRate: 352800, DSDReader: &gipsyDSDReader.Reader{}, WavDecoder: &foxWavReader.WavReader{}}
 	if ms = ap.attachMeters(true); ap.Decoder.DSDReader.Meter != ms[0] || ap.Decoder.WavDecoder.Meter != nil || ms[0].Rate != 352800 {
 		t.Fatalf("DSD: the reader's meter %p, the WAV reader's %p, reported %p", ap.Decoder.DSDReader.Meter, ap.Decoder.WavDecoder.Meter, ms[0])
 	}
@@ -204,7 +204,7 @@ func TestStageMetersLeaveOutWaits(t *testing.T) {
 		}
 	}
 	// the upsampler, its output unbuffered
-	u, err := foxUpsampler.New(44100, 705600, 2, foxUpsampler.DefaultCD, foxUpsampler.DefaultHiRes)
+	u, err := gipsyUpsampler.New(44100, 705600, 2, gipsyUpsampler.DefaultCD, gipsyUpsampler.DefaultHiRes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,13 +274,13 @@ func TestStageMetersLeaveOutWaits(t *testing.T) {
 func TestReportSpeed(t *testing.T) {
 	dir := t.TempDir()
 	ap := &AudioProcessor{AppSettings: &LyrionDSPSettings.AppSettings{TempDataFolder: dir},
-		Args: &LyrionDSPSettings.Arguments{CleanClientID: "aa_bb"}, Encoder: &foxAudioEncoder.AudioEncoder{Fill: &foxSpeed.Fill{}}}
-	fast, slow := &foxSpeed.Meter{Name: "decoder", Rate: 1000}, &foxSpeed.Meter{Name: "convolver 2", Rate: 1000}
+		Args: &LyrionDSPSettings.Arguments{CleanClientID: "aa_bb"}, Encoder: &foxAudioEncoder.AudioEncoder{Fill: &gipsySpeed.Fill{}}}
+	fast, slow := &gipsySpeed.Meter{Name: "decoder", Rate: 1000}, &gipsySpeed.Meter{Name: "convolver 2", Rate: 1000}
 	fast.Add(4000, 10*time.Millisecond)
 	slow.Add(4000, time.Second)
 	ap.Encoder.Fill.Wrote(4, time.Now().Add(-2*time.Second), 0) // one window: 4 s of audio in about 2 s
 	ap.Encoder.Fill.End()
-	ap.reportSpeed([]*foxSpeed.Meter{fast, slow})()
+	ap.reportSpeed([]*gipsySpeed.Meter{fast, slow})()
 	got, ok := readSpeed(t, filepath.Join(dir, "speed_aa_bb.json"))
 	if !ok || got.Stage != "convolver 2" || got.Audio != 4 || got.Busy < 1.9 || got.Busy > 3 || !got.Over || got.Pid != os.Getpid() {
 		t.Fatalf("the report holds %+v (ok %v), want the fill (4 s in about 2 s, over) and the busiest stage", got, ok)
@@ -290,7 +290,7 @@ func TestReportSpeed(t *testing.T) {
 		t.Fatalf("the stages' own times %v, want decoder 2.5 ms and convolver 2 250 ms a second of audio", got.Stages)
 	}
 	// (0.1.72.46) once the runs have a figure it is the speed: one run, 2 s of audio in 0.25 s
-	ap.runs = &foxSpeed.Runs{}
+	ap.runs = &gipsySpeed.Runs{}
 	ap.runs.Hold()
 	ap.runs.Free()
 	t0 := time.Now()
@@ -298,7 +298,7 @@ func TestReportSpeed(t *testing.T) {
 		ap.runs.In(0.5, t0.Add(time.Duration(i)*62500*time.Microsecond))
 	}
 	ap.runs.Hold()
-	ap.reportSpeed([]*foxSpeed.Meter{fast, slow})()
+	ap.reportSpeed([]*gipsySpeed.Meter{fast, slow})()
 	got, ok = readSpeed(t, filepath.Join(dir, "speed_aa_bb.json"))
 	if !ok || got.Audio != 2 || got.Busy != 0.25 || got.Runs != 1 || !got.Over || got.Stage != "convolver 2" {
 		t.Fatalf("with a run the report holds %+v (ok %v), want the run's 2 s in 0.25 s, 1 run", got, ok)
@@ -311,8 +311,8 @@ func TestReportSpeed(t *testing.T) {
 // The entry stage passes every block on, in order, and tells the runs each one but the input's last, with the time it
 // went in; then the input's end, which drops the window open then.
 func TestEntryStage(t *testing.T) {
-	run := func(sizes []int) *foxSpeed.Runs {
-		ap := &AudioProcessor{Decoder: &foxAudioDecoder.AudioDecoder{SampleRate: 1000}, runs: &foxSpeed.Runs{}}
+	run := func(sizes []int) *gipsySpeed.Runs {
+		ap := &AudioProcessor{Decoder: &foxAudioDecoder.AudioDecoder{SampleRate: 1000}, runs: &gipsySpeed.Runs{}}
 		ap.runs.Hold() // the stream's first run is the fill's: the runs count from the output's first wait
 		ap.runs.Free()
 		in := make(chan [][]float64)
@@ -352,7 +352,7 @@ func TestAttachLead(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no lead on Windows")
 	}
-	ap := &AudioProcessor{Encoder: &foxAudioEncoder.AudioEncoder{SampleRate: 705600, NumChannels: 2, BitDepth: 24}, runs: &foxSpeed.Runs{}}
+	ap := &AudioProcessor{Encoder: &foxAudioEncoder.AudioEncoder{SampleRate: 705600, NumChannels: 2, BitDepth: 24}, runs: &gipsySpeed.Runs{}}
 	l := ap.attachLead()
 	if l == nil || ap.Encoder.Out != l {
 		t.Fatal("no lead on a WAV encoder writing stdout")
@@ -371,10 +371,10 @@ func TestStageTimes(t *testing.T) {
 	if got := ap.StageTimes(); got != "" {
 		t.Fatalf("no meters: %q, want nothing", got)
 	}
-	dec, up, enc := &foxSpeed.Meter{Name: "decoder", Rate: 44100}, &foxSpeed.Meter{Name: "upsampler", Rate: 705600}, &foxSpeed.Meter{Name: "encoder", Rate: 705600}
+	dec, up, enc := &gipsySpeed.Meter{Name: "decoder", Rate: 44100}, &gipsySpeed.Meter{Name: "upsampler", Rate: 705600}, &gipsySpeed.Meter{Name: "encoder", Rate: 705600}
 	dec.Add(441000, 12*time.Millisecond)
 	enc.Add(7056000, 2502*time.Millisecond)
-	ap.Meters = []*foxSpeed.Meter{dec, up, enc}
+	ap.Meters = []*gipsySpeed.Meter{dec, up, enc}
 	if got := ap.StageTimes(); got != "decoder 1.2 ms, encoder 250.2 ms" {
 		t.Fatalf("StageTimes %q, want the decoder's 1.2 ms and the encoder's 250.2 ms a second of audio, the upsampler (no audio yet) left out", got)
 	}

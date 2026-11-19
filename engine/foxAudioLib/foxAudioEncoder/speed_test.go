@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
+	"github.com/Foxenfurter/foxAudioLib/gipsySpeed"
 )
 
 // encodeToPipe encodes frames of silence (PCM, 24-bit stereo at 1 kHz) in the blocks given, stdout a pipe whose reader
@@ -27,7 +27,7 @@ func encodeToPipe(t *testing.T, delay time.Duration, blocks ...int) (audio, busy
 		io.Copy(io.Discard, r)
 		close(drained)
 	}()
-	e := &AudioEncoder{Type: "PCM", SampleRate: 1000, BitDepth: 24, NumChannels: 2, Meter: &foxSpeed.Meter{Name: "encoder", Rate: 1000}}
+	e := &AudioEncoder{Type: "PCM", SampleRate: 1000, BitDepth: 24, NumChannels: 2, Meter: &gipsySpeed.Meter{Name: "encoder", Rate: 1000}}
 	if err := e.Initialise(); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func fillThroughPipe(t *testing.T, secs float64, read func(r *os.File)) (audio, 
 		io.Copy(io.Discard, r)
 		close(drained)
 	}()
-	e := &AudioEncoder{Type: "PCM", SampleRate: 48000, BitDepth: 24, NumChannels: 2, Fill: &foxSpeed.Fill{}}
+	e := &AudioEncoder{Type: "PCM", SampleRate: 48000, BitDepth: 24, NumChannels: 2, Fill: &gipsySpeed.Fill{}}
 	if err := e.Initialise(); err != nil {
 		t.Fatal(err)
 	}

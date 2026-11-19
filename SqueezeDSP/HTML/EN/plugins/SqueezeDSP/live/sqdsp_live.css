@@ -100,7 +100,16 @@ h1 { font-size: clamp(17px, 1.4vw, 22px); margin: 0; font-weight: 600; }
 .seg button:last-child { border-right: 0; }
 .seg button[aria-checked="true"] { background: var(--accent); color: #fff; }
 html.lt .seg button[aria-checked="true"] { color: #fff; }
-.seg button:disabled { opacity: 0.4; cursor: default; }
+/* a greyed button takes no pointer: what is under it gets the hover, and the page finds the button's why by position */
+.seg button:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+
+/* help on hover, drawn by the page (sqdsp_live.js, tipShow): Material's tooltip look in both themes, over everything,
+   never in the pointer's way */
+.tipbox { position: fixed; z-index: 1000; display: none; left: 0; top: 0; max-width: min(340px, calc(100vw - 16px));
+          padding: 6px 10px; border-radius: 4px; background: rgba(97,97,97,0.95); color: #fff;
+          font-size: 13px; line-height: 1.4; white-space: normal; pointer-events: none;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.35); }
+.tipbox.on { display: block; }
 
 .range { flex: 1 1 180px; min-width: 120px; accent-color: var(--accent); }
 .val { flex: 0 0 auto; min-width: 4.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--dim); }
@@ -110,6 +119,11 @@ html.lt .seg button[aria-checked="true"] { color: #fff; }
        color: var(--accent); font: inherit; font-size: 0.92em; cursor: pointer; }
 .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .btn:disabled { opacity: 0.45; cursor: default; }
+/* LMS's "Prefer native format" on: red, above everything */
+.nativebar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: #c62828; border-color: #c62828;
+             color: #fff; font-weight: 600; }
+.nativebar-t { flex: 1 1 220px; }
+.nativebar .btn { color: #fff; border-color: #fff; font-weight: 600; }
 .applyrow { display: flex; justify-content: flex-end; padding-top: 10px; }
 
 select, input[type="text"] { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line);

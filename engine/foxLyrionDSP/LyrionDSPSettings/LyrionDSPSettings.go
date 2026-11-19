@@ -13,7 +13,7 @@ import (
 
 	"github.com/Foxenfurter/foxAudioLib/foxFilters"
 	"github.com/Foxenfurter/foxAudioLib/foxLog"
-	"github.com/Foxenfurter/foxAudioLib/foxUpsampler"
+	"github.com/Foxenfurter/foxAudioLib/gipsyUpsampler"
 )
 
 func InitializeSettings() (*Arguments, *AppSettings, *ClientConfig, *foxLog.Logger, error) {
@@ -88,6 +88,18 @@ Options:
   --maxSampleRate=N   Maximum supported sample rate for Player (optional)
   --wavlength=SECONDS Length a WAV or DSF output's header states (optional; default from the input); for DSF an
                       upper bound: the stream ends with the input, its last block zero-padded
+  --insamples=N       The frames the input will carry, exactly (optional; for raw input, which states none): the
+                      output's header then states the stream's true length
+  --insamples=header  The WAV header on the input pipe states its frames exactly (a decoder proven to): use it.
+                      Without it a pipe's header is not taken as exact (a decoder can state the whole file after a
+                      seek, or an AAC stream's padded length: measured 2026-11-15)
+  --flacseek=OFFSET   A remote FLAC (--trackurl, http or https) arriving from byte OFFSET as LMS sends it (frames
+                      only after a seek or a resume, aligned as LMS aligns them; 0: from its start): the engine reads
+                      the stream's STREAMINFO and the first frame's number from the URL (two ranged reads) and states
+                      the frames left exactly
+  --tail              Play out the last track's held tail as a stream of its own (a player that needs the true length
+                      first, whose next track went after the stream held for it): no input; the stages' state from the
+                      residual, the same settings as that track's stream, its length stated exactly
   --dsdrate=N         DSF output: the DSD rate (2822400, 5644800, 11289600 or 22579200, or source: a DSD input's own);
                       without it, the player's DSDOutRate, else source
   --dsdmax=N          DSF output: the highest DSD rate (one of the four); without it, the player's DSDOutMax
@@ -209,9 +221,14 @@ type Arguments struct {
 	TrackURL        string        // Optional URL for detecting whether track has changed for gain re-use
 	MaxSampleRate   int           // Optional max sample rate supported by Player, for resampling if needed
 	WavLength       float64       // Optional seconds a WAV output's header states (--wavlength); 0 = from the input
-	DSDCutoff       float64       // --dsdcutoff: a DSD input's low-pass, Hz, above 20000 to 60000; 0 = none
-	DSDGain         float64       // --dsdgain: dB on a DSD input (0: its full swing at full scale)
-	DSDCutoffSet    bool          // given on the command line: it wins over the player's DSDCutoff
+	InSamples       int64         // --insamples: the frames the input will carry, exactly; 0 = from the input, if it says
+	InHeader        bool          // --insamples=header: a WAV header on the input pipe states its frames exactly
+	FlacSeek        int64         // --flacseek: the byte a remote FLAC's stream starts at (FlacSeekSet: given)
+	FlacSeekSet     bool
+	Tail            bool    // --tail: the last track's held tail played out on its own, no input
+	DSDCutoff       float64 // --dsdcutoff: a DSD input's low-pass, Hz, above 20000 to 60000; 0 = none
+	DSDGain         float64 // --dsdgain: dB on a DSD input (0: its full swing at full scale)
+	DSDCutoffSet    bool    // given on the command line: it wins over the player's DSDCutoff
 	DSDGainSet      bool
 	untilTime       string // --until: where a DSD input ends, m:ss.ff from the file's start (LMS's %v)
 	EndTime         time.Duration
@@ -222,8 +239,8 @@ type Arguments struct {
 	DSDOutGain      float64 // --dsdoutgain: dB before the modulator
 	DSDSource       string  // --dsdsource: dsd or pcm ("": dsd)
 	UpsampleRate    int     // --upsample: a PCM input's rate before the DSP, up or down (0: as it comes)
-	UpFilterCD      foxUpsampler.Choice
-	UpFilterHiRes   foxUpsampler.Choice
+	UpFilterCD      gipsyUpsampler.Choice
+	UpFilterHiRes   gipsyUpsampler.Choice
 	upFilterSet     bool
 	Debug           bool
 }
@@ -231,7 +248,7 @@ type Arguments struct {
 // ReadArgs reads the command-line arguments and returns an Arguments object.
 // Argument labels are case-insensitive.
 func ReadArgs() (*Arguments, error) {
-	args := &Arguments{UpFilterCD: foxUpsampler.DefaultCD, UpFilterHiRes: foxUpsampler.DefaultHiRes}
+	args := &Arguments{UpFilterCD: gipsyUpsampler.DefaultCD, UpFilterHiRes: gipsyUpsampler.DefaultHiRes}
 
 	// Get executable name
 	if len(os.Args) > 0 {
@@ -296,6 +313,9 @@ func ReadArgs() (*Arguments, error) {
 	if args.upFilterSet && args.UpsampleRate == 0 {
 		return nil, fmt.Errorf("--upfilter needs --upsample")
 	}
+	if args.FlacSeekSet && !strings.HasPrefix(args.TrackURL, "http://") && !strings.HasPrefix(args.TrackURL, "https://") {
+		return nil, fmt.Errorf("--flacseek needs --trackurl, the stream's http or https URL")
+	}
 	if args.untilTime != "" {
 		if strings.ToUpper(args.InputFormat) != "DSD" { // only the DSD decoder honours it: refused, not ignored
 			return nil, fmt.Errorf("--until needs --formatin=DSD")
@@ -345,6 +365,7 @@ func parseArgs(args *Arguments) error {
 	// Flags that do NOT take a value
 	noValueFlags := map[string]bool{
 		"debug": true,
+		"tail":  true,
 	}
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
@@ -446,6 +467,24 @@ func parseArgs(args *Arguments) error {
 					return fmt.Errorf("invalid value for --wavlength: %s", value)
 				}
 				args.WavLength = val
+			case "insamples":
+				if value == "header" {
+					args.InHeader = true
+					break
+				}
+				val, err := strconv.ParseInt(value, 10, 64)
+				if err != nil || val < 0 {
+					return fmt.Errorf("invalid value for --insamples: %s", value)
+				}
+				args.InSamples = val
+			case "flacseek":
+				val, err := strconv.ParseInt(value, 10, 64)
+				if err != nil || val < 0 {
+					return fmt.Errorf("invalid value for --flacseek: %s", value)
+				}
+				args.FlacSeek, args.FlacSeekSet = val, true
+			case "tail":
+				args.Tail = true
 			case "dsdcutoff":
 				val, err := strconv.ParseFloat(value, 64)
 				// to 60 kHz: the decoder's first stage is flat to 80 kHz, and a cutoff's band is up to 20 kHz wide
@@ -506,11 +545,11 @@ func parseArgs(args *Arguments) error {
 				if !two {
 					hi = cd
 				}
-				c, err := foxUpsampler.ParseChoice(cd)
+				c, err := gipsyUpsampler.ParseChoice(cd)
 				if err != nil {
 					return fmt.Errorf("invalid value for --upfilter: %w", err)
 				}
-				h, err := foxUpsampler.ParseChoice(hi)
+				h, err := gipsyUpsampler.ParseChoice(hi)
 				if err != nil {
 					return fmt.Errorf("invalid value for --upfilter: %w", err)
 				}

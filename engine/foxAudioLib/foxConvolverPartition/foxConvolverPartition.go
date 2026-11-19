@@ -11,8 +11,8 @@ import (
 	"time"
 
 	fft "github.com/Foxenfurter/foxAudioLib/foxFFT"
-	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
 	"github.com/Foxenfurter/foxAudioLib/foxUtils"
+	"github.com/Foxenfurter/foxAudioLib/gipsySpeed"
 )
 
 var (
@@ -68,9 +68,9 @@ type PartitionedConvolver struct {
 	DebugFunc   func(string)
 	WarningFunc func(string)
 
-	// Meter (SqueezeDSP fork): ConvolveChannel's own work, for the engine's speed (foxSpeed); its waits for the
+	// Meter (SqueezeDSP fork): ConvolveChannel's own work, for the engine's speed (gipsySpeed); its waits for the
 	// stages either side left out. Not in the filter cache (GobEncode names its fields).
-	Meter *foxSpeed.Meter
+	Meter *gipsySpeed.Meter
 }
 
 // ─── Size configuration ───────────────────────────────────────────────────────

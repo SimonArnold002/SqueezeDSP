@@ -13,6 +13,23 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.55	Fork: the new page's help shows when the pointer rests on a label or button (the page draws it, as
+				the classic page does; the browser's own tooltip did not show inside Material). The engine's own
+				parts are named gipsy..., not fox... (nothing it does changes).
+	0.1.72.54	Fork: WAV's 4 GB limit is on the PCM (WAV 24-bit) button's hover, no longer in the Output help.
+	0.1.72.53	Fork: a streamed FLAC whose rate LMS does not know yet (a next track queued in the first seconds of
+				a Qobuz album) is read for its own rate, channels and bits instead of the engine stopping. The
+				Output help gives WAV's longest track at each rate (the format's 4 GB limit).
+	0.1.72.52	Fork: two more phases for each upsampling filter, Intermediate 80% and 70% (nearer linear: the top of
+				the band less delayed, less ringing before a transient than linear); Kaiser's Intermediate keeps its
+				Linear's level above 20 kHz. "Exact track length", a per-player option, off by default, for a UPnP
+				or bridged player that gets stuck at the end of a track.
+	0.1.72.51	Fork: a change saved on a player whose DSP is off no longer restarts its track. A red bar on both
+				pages while LMS's "Prefer native format" is on, with a button that turns it off.
+	0.1.72.50	Fork: now playing on LMS 9.2 shows SqueezeDSP's rate with DSDPlayer installed too (its own hook had
+				replaced ours); DSDPlayer's streams keep its answer.
+	0.1.72.49	Fork: on LMS 9.2, now playing shows what SqueezeDSP sends the player (its rate and bit depth: the
+				upsampled rate, DXD, the DSD rate out) in place of LMS's guess. Earlier LMS is unchanged.
 	0.1.72.48	Fork: native DSD carries the PEQ: at a DSD rate the engine had dropped every PEQ filter (and with
 				loudness on it stopped); the PEQ and loudness are now designed at the DSD rate, as the DXD route
 				does at its own. Nothing else changes.
@@ -283,7 +300,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.48";
+my $revision = "0.1.72.55";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
@@ -320,6 +337,7 @@ use Plugins::SqueezeDSP::Binary;
 use Plugins::SqueezeDSP::Upsample;
 use Plugins::SqueezeDSP::WavLength;
 use Plugins::SqueezeDSP::Gapless;
+use Plugins::SqueezeDSP::NowPlaying;
 use Plugins::SqueezeDSP::Status;
 use Plugins::SqueezeDSP::Page;
 
@@ -371,12 +389,13 @@ sub initPlugin {
                                                                : "ffmpeg $ff has no soxr: a DFF reaches its rate through ffmpeg's own resampler" )
                       : "no ffmpeg found: a DFF is decoded by DSDPlayer's dsdplay or LMS's sox";
         Plugins::SqueezeDSP::Utils::debug("upsampling available (the engine resamples); $msg");
-        my $perl = Plugins::SqueezeDSP::WavLength::perl();
-        Plugins::SqueezeDSP::Utils::debug( "PCM mode states each track's length in its WAV header (the engine's --wavlength; "
-            . ( $perl ? "a filter on $perl after a resample to the player's max)" : "after a resample to the player's max it says unknown: no perl beside LMS)" ) );
+        Plugins::SqueezeDSP::Utils::debug("each stream's header states its length (the engine's --insamples where the count is known, else --wavlength)");
         # the engine's gapless note per player, written at each of our streams' start (the wrap) and kept up with the
         # playlist (Gapless.pm)
         Plugins::SqueezeDSP::Gapless::install();
+        # LMS 9.2's now playing: what each of our streams sends the player, from the command the wrap saw, in place of
+        # LMS's guess (NowPlaying.pm; earlier LMS never asks)
+        Plugins::SqueezeDSP::NowPlaying::install();
     } else {
         $log->warn("LMS has no tokenizeConvertCommand2 to wrap: upsampling unavailable");
     }

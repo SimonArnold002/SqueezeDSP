@@ -1,5 +1,5 @@
 #!/bin/sh
-# The DSD encoder's spec bench (foxDSDEncoder spec_test.go): at DSD64-512 and for every modulator, the noise in
+# The DSD encoder's spec bench (gipsyDSDEncoder spec_test.go): at DSD64-512 and for every modulator, the noise in
 # band and out of band, where it rises, and the loop's stability, on the encoder's shipped path; with DSF files,
 # what the modulator adds to real music too. Simon 2026-11-03: "can we have test bench kept so we dont have to
 # rebuild one each time". Nothing is built into the engine; build.sh's environment (GOTOOLCHAIN=local, the module
@@ -38,5 +38,5 @@ set -- -spec -specout="$out" -specstart="${START:-30}" -specsecs="${SECS:-10}"
 cd "$here/foxAudioLib"
 run='TestSpec'
 [ -n "${MUSICONLY:-}" ] && run='^TestSpecMusic$'
-"$go" test ./foxAudioEncoder/foxDSDEncoder/ -run "$run" -count=1 -timeout 90m -v -args "$@"
+"$go" test ./foxAudioEncoder/gipsyDSDEncoder/ -run "$run" -count=1 -timeout 90m -v -args "$@"
 echo "report: $out"

@@ -6,7 +6,7 @@ package Plugins::SqueezeDSP::TemplateConfig;
 
 sub get_config_revision
 {
-	my $configrevision = "0.3.20";
+	my $configrevision = "0.3.21";
 	return $configrevision;
 }
 
@@ -236,7 +236,7 @@ sub _dsdPlay {
 		. $ENGINE . ' --formatin=PCM --be=false --bitsin=24 --samplerate=$DXD$ --channels=$CHANNELS$' ];
 }
 
-# A DSF on our engine's own DSD decoder (engine/foxAudioLib/foxAudioDecoder/foxDSDReader; ledger OUR OWN DSD DECODER):
+# A DSF on our engine's own DSD decoder (engine/foxAudioLib/foxAudioDecoder/gipsyDSDReader; ledger OUR OWN DSD DECODER):
 # the engine reads the file itself and decodes it straight to the player's $DXD$, with the low-pass and gain from the
 # player's settings (DSDCutoff, DSDGain, read by the engine at each track). It seeks to the byte (--skip, %t) and
 # ends a cue track (--until, %v), both from the file's start, each exactly the full decode's samples. Every target
@@ -303,6 +303,15 @@ sub _build {
 	return $text;
 }
 
+# The D rule (a track above the player's max, the Sample Rate Converter off; the exact-length round's step 3c, decided
+# 2026-11-05: "if its going through SDP we do it for everything"): the engine's own resampler takes it to the rate LMS
+# asks for (%d), before the DSP, as the Upsample route does, so its gapless joins carry (THE GAPLESS ROUND) and the
+# engine is the last PCM stage, its header stating the stream's length (no sox after it, no filter after sox). Its
+# filters are the player's PCM ones, filled in at stream start (Upsample::_tokenize, DFILTER), so a change to them
+# needs no new rule.
+my $DCAPS  = 'D:{RESAMPLE=--upsample=%d}';
+my $DFLAGS = ' $RESAMPLE$ --upfilter=' . 'SQDSPDF';
+
 # Each template takes $up (_build's) and the conf's options, a hash: dsd ('dsdplay' or 'sox' with no ffmpeg on the
 # server), dsdEngine (a DSF on our engine) and, for MP3 at a Bitrate Limiting, kbps.
 #
@@ -315,7 +324,7 @@ sub template_FLAC24
 	my $flac = '[flac] -cs -0 --totally-silent --ignore-chunk-sizes -';
 	return _build( 'flc',
 		sub { [ $_[0], "$_[1] --formatout=WAV | $flac" ] },
-		sub { [ "$_[0]D:{RESAMPLE=rate -v %d}", "$_[1] --formatout=WAV | [sox] -q --ignore-length -t wav - -t flac -C 0 -b 24 - \$RESAMPLE\$" ] },
+		sub { [ "$_[0]$DCAPS", "$_[1]$DFLAGS --formatout=WAV | $flac" ] },
 		sub { "$_[0] --formatout=WAV | $flac" },
 		$up, $o || {},
 	);
@@ -380,7 +389,7 @@ sub _reduced {
 # decoded by our engine, through the player's DSP at DXD (352.8k, whatever the DSD rate; Simon 2026-11-03: "this is
 # how it should be done to preserve as much as possible") or at 176.4k where the player's DSDOutDSP asks for it, for a
 # server short of CPU (Configuration::dsdOutDSP, the option dsdp), and modulated back to DSD as a DSF stream
-# (engine/foxAudioLib/foxAudioEncoder/foxDSDEncoder; ledger OUR OWN DSD ENCODER). The DSD rate (the source's, or a
+# (engine/foxAudioLib/foxAudioEncoder/gipsyDSDEncoder; ledger OUR OWN DSD ENCODER). The DSD rate (the source's, or a
 # fixed one), its max and the modulator are the player's DSDOutRate, DSDOutMax and DSDOutMod, read by the engine at
 # each track, so a change to them needs no new rule. D bare, as LMS's own dsf dsf rule (convert.conf): LMS records a
 # DSF's rate as its DSD rate and asks for D. A seek and a cue track's end as the DSD to PCM rule (_dsdEngine). Only a
@@ -414,8 +423,9 @@ sub template_DSF {
 #     the engine decodes at DXD instead where the converter's rate is under the file's); a DFF and WavPack DSD at dsdp.
 # The engine's flags go before the DSD flags, which end the command for WavLength to find.
 my $CONVRATE = 705600;
-# a filter's name as the engine reads it (Upsample.pm's @FILTERS, 0.1.72.44: Kaiser, Gaussian, Half-band, Slow, Non-ringing)
-my $FILTER   = qr/(?:(?:short|long|xlong|gauss-(?:short|medium|long)|halfband|slow)-(?:lin|int|min)|nonring)/;
+# a filter's name as the engine reads it (Upsample.pm's @FILTERS, 0.1.72.44: Kaiser, Gaussian, Half-band, Slow, Non-ringing;
+# 2026-11-15: the phases int80 and int70 too)
+my $FILTER   = qr/(?:(?:short|long|xlong|gauss-(?:short|medium|long)|halfband|slow)-(?:lin|int80|int70|int|min)|nonring)/;
 sub template_DSFUP {
 	my ( $up, $o ) = @_;
 	$o ||= {};
@@ -452,10 +462,9 @@ sub template_OGG { return _reduced( 'OGG', $_[1] ) }
 sub template_WAV
 {
 	my ( $up, $o ) = @_;
-	my $sox = '[sox] -q --ignore-length -t wav - -t wav -b 24 -';
 	return _build( 'wav',
 		sub { [ $_[0], "$_[1] --formatout=WAV" ] },
-		sub { [ "$_[0]D:{RESAMPLE=rate -v %d}", "$_[1] --formatout=WAV | $sox \$RESAMPLE\$" ] },
+		sub { [ "$_[0]$DCAPS", "$_[1]$DFLAGS --formatout=WAV" ] },
 		sub { "$_[0] --formatout=WAV" },
 		$up, $o || {},
 	);

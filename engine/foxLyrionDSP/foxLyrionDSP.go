@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxDSDEncoder"
+	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/gipsyDSDEncoder"
 	"github.com/Foxenfurter/foxAudioLib/foxBufferedStdinReader"
 	"github.com/Foxenfurter/foxAudioLib/foxConvolverPartition"
-	"github.com/Foxenfurter/foxAudioLib/foxUpsampler"
+	"github.com/Foxenfurter/foxAudioLib/gipsyUpsampler"
 	"github.com/Foxenfurter/foxLyrionDSP/LyrionDSPProcessAudio"
 	"github.com/Foxenfurter/foxLyrionDSP/LyrionDSPSettings"
 	//"net/http/pprof" // Import for side effects
@@ -98,7 +98,7 @@ func main() {
 		useStdIn = foxBufferedStdinReader.IsStdinPipe()
 	}
 
-	if myArgs.InPath == "" && !useStdIn {
+	if myArgs.InPath == "" && !useStdIn && !myArgs.Tail { // --tail opens an empty input of its own (tail.go)
 		ErrorMsg += fmt.Sprintf("Error: No input specified\n")
 		fatalError = true
 	}
@@ -204,7 +204,7 @@ func main() {
 		elapsed))
 	// (SqueezeDSP fork) whether the upsampler's and the FIR's loops run in AVX2 (an amd64 engine built with
 	// GOEXPERIMENT=simd, on a CPU with AVX2): the bits are the same either way, so only this line says which ran
-	myLogger.Info(fmt.Sprintf("AVX2 loops: upsampler %t, FIR %t", foxUpsampler.AVX2(), foxConvolverPartition.AVX2()))
+	myLogger.Info(fmt.Sprintf("AVX2 loops: upsampler %t, FIR %t", gipsyUpsampler.AVX2(), foxConvolverPartition.AVX2()))
 
 	initTime := end.Sub(start).Seconds()
 	// Process audio
@@ -279,9 +279,9 @@ func main() {
 // the old loop's beside the AVX2 one's where both run (the same bits either way).
 func bench(w io.Writer) {
 	fmt.Fprintf(w, "SqueezeDSP engine bench: %s %s/%s, %d CPUs, AVX2 loops: upsampler %t, FIR %t\n",
-		runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), foxUpsampler.AVX2(), foxConvolverPartition.AVX2())
+		runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), gipsyUpsampler.AVX2(), foxConvolverPartition.AVX2())
 	const each = 900 * time.Millisecond
-	foxUpsampler.Bench(w, each)
+	gipsyUpsampler.Bench(w, each)
 	foxConvolverPartition.Bench(w, each)
-	foxDSDEncoder.Bench(w, each)
+	gipsyDSDEncoder.Bench(w, each)
 }

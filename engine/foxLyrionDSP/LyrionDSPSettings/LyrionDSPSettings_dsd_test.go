@@ -176,6 +176,9 @@ func TestUpsampleArgs(t *testing.T) {
 		{append(pcm, "--upsample=705600"), "", 705600, "short-int", "short-lin", ""},
 		{append(pcm, "--upsample=705600", "--upfilter=long-min,short-int"), "", 705600, "long-min", "short-int", ""},
 		{append(pcm, "--upsample=705600", "--upfilter=LONG-LIN"), "", 705600, "long-lin", "long-lin", ""},
+		// the linear-leaning intermediates (2026-11-15)
+		{append(pcm, "--upsample=705600", "--upfilter=short-int80,gauss-long-int70"), "", 705600, "short-int80", "gauss-long-int70", ""},
+		{append(pcm, "--upsample=705600", "--upfilter=short-int60"), "--upfilter", 0, "", "", ""},
 		{append(pcm, "--dsdsource=pcm"), "", 0, "short-int", "short-lin", "pcm"},
 		{append(pcm, "--dsdsource=DSD"), "", 0, "short-int", "short-lin", "dsd"},
 		{append(pcm, "--upsample=44100"), "", 44100, "short-int", "short-lin", ""}, // a PCM target down to 44.1k

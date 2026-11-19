@@ -2,7 +2,7 @@ package Plugins::SqueezeDSP::Upsample;
 # Upsampling (docs/fork-plan.md step 7), per player, default off.
 #
 # With Upsample on (the Sample Rate Converter's PCM), a track reaches our engine at its own rate, on the route it takes
-# with Upsample off, and the engine resamples it itself before the DSP (--upsample, engine foxUpsampler): to the
+# with Upsample off, and the engine resamples it itself before the DSP (--upsample, engine gipsyUpsampler): to the
 # highest rate of its own family the player takes, by its own two-stage filters, the player's choice for a source at
 # 48 kHz and under and another for hi-res (--upfilter; Simon 2026-11-04: "Separate for PCM", the converter to DSD has
 # its own). In 64-bit float from the decoder on, so an inter-sample peak reaches the DSP as a real sample, its meters
@@ -14,7 +14,8 @@ package Plugins::SqueezeDSP::Upsample;
 # The rules carry the target as SQDSPUP_<44.1k family>_<48k family>, written per player from its
 # max. A conf rule cannot pick the family per track (its only rate selector is D, and a conf line
 # does no arithmetic), so tokenizeConvertCommand2 is wrapped to fill it in at stream start: the
-# plugin's only hook into LMS core. The same wrap states PCM mode's WAV length (WavLength.pm).
+# plugin's only wrap of LMS core. The same wrap states PCM mode's WAV length (WavLength.pm) and keeps
+# the command for LMS 9.2's now playing (NowPlaying.pm).
 #
 # The target (@TARGETS): 'family', each track to the top rate of its own family (the default), or
 # 'fixed', every track to the player's top rate, so the player never changes rate between tracks
@@ -34,6 +35,8 @@ use constant CAP => 384000;
 # supports upto 768 PCM").
 use constant CAP_WAV => 768000;
 use constant PLACEHOLDER => 'SQDSPUP_';
+# the D rule's filters (TemplateConfig $DFLAGS), filled in at stream start with the player's PCM ones
+use constant DFILTER => 'SQDSPDF';
 
 # The max rates the page offers below the player's own top rate, 0 being the player's own (Simon 2026-11-01:
 # "an option in SDP to set a max rate for the fixed rate and not just go with the highest it says. We need options
@@ -49,7 +52,7 @@ my @TARGETS = qw(family fixed);
 my @DSDRATES = ( 2822400, 5644800, 11289600, 22579200 );
 use constant DEFAULT_DSDRATE => 2822400;
 
-# The engine's filters (foxUpsampler): a track reaches the engine at its own rate and the engine resamples it itself,
+# The engine's filters (gipsyUpsampler): a track reaches the engine at its own rate and the engine resamples it itself,
 # for the converter to DSD to 705.6k (0.1.72.33: TemplateConfig $CONVRATE; Simon 2026-11-04: "for PCM to DSD we do it on
 # the high rate after resampling before we push it to the SDM") and with Upsample on to the PCM target (0.1.72.37).
 # The filter is the player's choice, one for a source at 48 kHz and under and one for hi-res, each short or long, then
@@ -61,12 +64,15 @@ use constant DEFAULT_DSDRATE => 2822400;
 # Since 0.1.72.44 a family of filters, picked from one dropdown by name, length and phase (Simon 2026-11-06, ledger THE
 # FILTER FAMILY): Kaiser (short, long, xlong: its names as before, so a stored choice carries over), Gaussian
 # (gauss-short, -medium, -long), Half-band and Slow roll-off (leaky, for listening), each linear, intermediate or
-# minimum, and Non-ringing (nonring), alone. The engine's Choices(), in its order; Status and TemplateConfig check
-# the same names.
+# minimum, and Non-ringing (nonring), alone. Since 2026-11-15 two linear-leaning intermediates beside each
+# intermediate, 80% and 70% linear (int80, int70; Simon: "keep both filters for now then I can decide which works best",
+# ledger `A LINEAR-LEANING INTERMEDIATE`), each length's phases linear to minimum. The engine's Choices(), in its
+# order; Status and TemplateConfig check the same names.
+my @PHASES = qw(lin int80 int70 int min);
 my @FILTERS = (
-    ( map { my $l = $_; map { "$l-$_" } qw(lin int min) } qw(short long xlong) ),
-    ( map { my $l = $_; map { "gauss-$l-$_" } qw(lin int min) } qw(short medium long) ),
-    ( map { my $f = $_; map { "$f-$_" } qw(lin int min) } qw(halfband slow) ),
+    ( map { my $l = $_; map { "$l-$_" } @PHASES } qw(short long xlong) ),
+    ( map { my $l = $_; map { "gauss-$l-$_" } @PHASES } qw(short medium long) ),
+    ( map { my $f = $_; map { "$f-$_" } @PHASES } qw(halfband slow) ),
     'nonring',
 );
 sub filterNames { return @FILTERS }
@@ -254,12 +260,26 @@ sub _tokenize {
         }
     }
 
+    # the D rule's filters: the player's PCM ones as they are now; on any error the defaults, so the engine never gets the
+    # placeholder
+    if ( defined $command && index( $command, DFILTER ) >= 0 ) {
+        my $f = eval { pcmFilters( Plugins::SqueezeDSP::Configuration::clientPrefs( Slim::Player::Client::getClient( $_[0]->{clientid} ) ) ) };
+        $f = DEFAULT_FILTER_CD . ',' . DEFAULT_FILTER_HIRES unless defined $f && $f =~ /^[a-z-]+,[a-z-]+$/;
+        my $d = DFILTER;
+        $command =~ s/\Q$d\E/$f/g;
+    }
+
     # PCM mode's WAV header states the length still to play (WavLength.pm); it touches only our
     # WAV rules, and on any error the command stays as it was.
-    my $wav = eval { Plugins::SqueezeDSP::WavLength::apply( $command, $_[0] ) };
-    # the engine's gapless note for this stream's player (Gapless.pm): our rules only; the command is not touched
-    eval { Plugins::SqueezeDSP::Gapless::streamStart( $_[0] ) };
-    return defined $wav ? $wav : $command;
+    # and the frames the engine's input carries where they can be known (the exact-length round, step 3)
+    my $wav = eval { Plugins::SqueezeDSP::WavLength::apply( $command, $_[0], $_[1], $_[2] ) };
+    $command = $wav if defined $wav;
+    # the engine's gapless note for this stream's player (Gapless.pm): our rules only; the command is not touched (kept
+    # for a held tail's own stream, Gapless::tail)
+    eval { Plugins::SqueezeDSP::Gapless::streamStart( $_[0], $command ) };
+    # what the stream sends the player, for LMS 9.2's now playing (NowPlaying.pm): our rules only; the command is not touched
+    eval { Plugins::SqueezeDSP::NowPlaying::streamStart( $_[0], $command ) };
+    return $command;
 }
 
 # The track's own rate when it is already at its target, from LMS's view of it (the number $SAMPLERATE$

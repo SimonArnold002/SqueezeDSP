@@ -13,10 +13,10 @@ package Plugins::SqueezeDSP::Status;
 #
 # REAL TIME SPEED is how many times faster than real time the engine runs flat out, as the engine itself measures and
 # reports it (LyrionDSPProcessAudio reportSpeed, read by _engineSpeed): one figure on every platform. At a stream's
-# start its FILL (foxSpeed.Fill, 0.1.72.35): the audio written while the player's buffer filled and LMS took
+# start its FILL (gipsySpeed.Fill, 0.1.72.35): the audio written while the player's buffer filled and LMS took
 # everything, over the time taken, its waits for the player left out. Since 0.1.72.46 also while it plays (Simon
 # 2026-11-06: "a user needs to see the limits of their machine"): the engine keeps up to 3 s of its output ahead of LMS
-# and refills it in runs, flat out, each timed where the audio enters it (foxSpeed.Runs), the figure the runs of the
+# and refills it in runs, flat out, each timed where the audio enters it (gipsySpeed.Runs), the figure the runs of the
 # last 10 s; so a heavier track or a busier server shows within a run or two (ledger THE SPEED SHOWN IS ONE START'S
 # FILL). Not on Windows, where LMS's socketwrapper ends a pipeline's processes 2 s after its first one: there the fill
 # alone, and a gapless change, whose engine never runs flat out, keeps the player's last fill (%fill); elsewhere that
@@ -256,11 +256,12 @@ sub pipelinePids {
 # a player's remembered engine and measurement dropped (the tests start each case clean)
 sub forget { delete $cache{ $_[0] }; delete $last{ $_[0] }; delete $fill{ $_[0] } }
 
-# What a stage is, from its command line
+# What a stage is, from its command line (a Windows path too, from LMS's command there: streamOutput)
 sub _role {
     my ( $argv, $isEngine ) = @_;
     return 'dsp' if $isEngine;
-    my $bin = lc( ( split m{/}, $argv->[0] // '' )[-1] );
+    my $bin = lc( ( split m{[/\\]}, $argv->[0] // '' )[-1] // '' );
+    $bin =~ s/\.exe$//;
     my $args = join( ' ', @$argv[ 1 .. $#$argv ] );
     if ( $bin eq 'ffmpeg' ) {
         # the DSD rule's ffmpeg (TemplateConfig.pm $DSD) decodes a DSF or DFF file, and resamples it too
@@ -285,8 +286,6 @@ sub _role {
     return 'opus-enc' if $bin eq 'opusenc';
     return 'flac-dec' if $bin eq 'flac' && $args =~ /(?:^| )-d/;
     return 'flac-enc' if $bin eq 'flac';
-    # PCM mode's length filter (WavLength.pm): the Perl LMS runs on, given the filter with -e
-    return 'wavlength' if $bin =~ /^perl/ && ( $argv->[1] // '' ) eq '-e' && index( $argv->[2] // '', 'RIFF' ) >= 0;
     return $bin;
 }
 
@@ -351,9 +350,10 @@ sub _resampler {
 # (--upfilter: one for a source at 48 kHz and under, then one for hi-res, the source's rate saying which ran; one value
 # serves both, as the engine reads it; none or one it refuses, its defaults). Nothing ran for a source already there.
 # The filter that ran, as the page names it: its family (kaiser, gauss, halfband, slow, nonring), length (Kaiser's and
-# Gaussian's) and phase (none for Non-ringing). Going down a leaky family runs as Kaiser short in its phase, as the
-# engine does it (foxUpsampler New).
-my $FILTER = qr/(?:(?:short|long|xlong|gauss-(?:short|medium|long)|halfband|slow)-(?:lin|int|min)|nonring)/;
+# Gaussian's) and phase (none for Non-ringing; intermediate80 and intermediate70 the linear-leaning ones, 2026-11-15).
+# Going down a leaky family runs as Kaiser short in its phase, as the engine does it (gipsyUpsampler New).
+my $PHASE  = qr/(?:lin|int80|int70|int|min)/;
+my $FILTER = qr/(?:(?:short|long|xlong|gauss-(?:short|medium|long)|halfband|slow)-$PHASE|nonring)/;
 sub _engineUp {
     my ( $a, $rate ) = @_;
     return undef unless ( $a->{upsample} // '' ) =~ /^\d+$/ && uc( $a->{formatin} // '' ) ne 'DSD';
@@ -362,12 +362,13 @@ sub _engineUp {
     @f = ( $f[0] ) x 2 if @f == 1;
     @f = ( 'short-int', 'short-lin' ) unless @f == 2 && !grep { !/^$FILTER$/ } @f;
     my $f = ( defined $rate && $rate > 48000 ) ? $f[1] : $f[0];
-    $f = 'short-' . ( $f =~ /-(lin|int|min)$/ ? $1 : 'lin' ) if defined $rate && $rate > $a->{upsample} && $f =~ /^(?:halfband|slow|nonring)\b/;
+    $f = 'short-' . ( $f =~ /-($PHASE)$/ ? $1 : 'lin' ) if defined $rate && $rate > $a->{upsample} && $f =~ /^(?:halfband|slow|nonring)\b/;
     my ( $fam, $len, $ph ) = $f eq 'nonring' ? ( 'nonring', undef, undef )
-                           : $f =~ /^(gauss|halfband|slow)-(?:(short|medium|long)-)?(lin|int|min)$/ ? ( $1, $2, $3 )
-                           : $f =~ /^(short|long|xlong)-(lin|int|min)$/ ? ( 'kaiser', $1, $2 ) : ();
+                           : $f =~ /^(gauss|halfband|slow)-(?:(short|medium|long)-)?($PHASE)$/ ? ( $1, $2, $3 )
+                           : $f =~ /^(short|long|xlong)-($PHASE)$/ ? ( 'kaiser', $1, $2 ) : ();
     return { tool => 'engine', target => 0 + $a->{upsample}, filter => $f, family => $fam, len => $len,
-             phase => defined $ph ? { lin => 'linear', int => 'intermediate', min => 'minimum' }->{$ph} : undef };
+             phase => defined $ph ? { lin => 'linear', int => 'intermediate', min => 'minimum', int80 => 'intermediate80',
+                                      int70 => 'intermediate70' }->{$ph} : undef };
 }
 
 # The output stage: LMS's flac, or the engine writing WAV itself (PCM mode), or sox writing WAV or
@@ -405,6 +406,68 @@ sub _output {
     return undef;
 }
 
+# The rate the engine reads and the rate its DSP runs at, from its arguments: native DSD (--samplerate=native, the native
+# round) reads at the source's DSD rate, LMS's view of the track ($fallbackRate, also for the one route whose command
+# carries no rate); the DSP runs at the converter's rate (--upsample: the engine upsamples itself, 0.3.19), else the
+# input's
+sub _rates {
+    my ( $a, $fallbackRate ) = @_;
+    my $native = lc( $a->{samplerate} // '' ) eq 'native';
+    my $rate = $native ? $fallbackRate : $a->{samplerate} // $fallbackRate;
+    my $dspRate = ( $a->{upsample} // '' ) =~ /^\d+$/ && uc( $a->{formatin} // '' ) ne 'DSD' ? 0 + $a->{upsample} : $rate;
+    return ( $rate, $dspRate );
+}
+
+# The stages of a command as LMS builds it (tokenizeConvertCommand2), each the argv /proc would list once it runs: split
+# at every pipe outside quotes, then into words with the shell's quoting taken off (in double quotes a backslash keeps
+# only $ ` " and \ literal, which is how LMS escapes a path: TranscodingHelper.pm:576-579). LMS's own ' &' and ' |' at
+# the end (:663-666) are no stage.
+sub stagesOf {
+    my $command = shift // '';
+    $command =~ s/\s*&?\s*\|?\s*$//s;
+    my ( @stages, @words, $word, $q );
+    my @c = split //, $command;
+    for ( my $i = 0; $i < @c; $i++ ) {
+        my $ch = $c[$i];
+        if ( defined $q ) {
+            if ( $ch eq $q ) { undef $q }
+            elsif ( $q eq '"' && $ch eq '\\' && $i < $#c && $c[ $i + 1 ] =~ /[\$`"\\]/ ) { $word .= $c[ ++$i ] }
+            else { $word .= $ch }
+        }
+        elsif ( $ch eq '"' || $ch eq "'" ) { $q = $ch; $word //= '' }
+        elsif ( $ch eq '\\' && $i < $#c ) { $word .= $c[ ++$i ] }
+        elsif ( $ch =~ /\s/ || $ch eq '|' ) {
+            push @words, $word if defined $word;
+            undef $word;
+            if ( $ch eq '|' ) { push @stages, [@words] if @words; @words = () }
+        }
+        else { $word .= $ch }
+    }
+    push @words, $word if defined $word;
+    push @stages, [@words] if @words;
+    return @stages;
+}
+
+# What one of our commands sends the player, read from the command LMS built (stagesOf) as `measure` reads a running
+# pipeline: the same roles, engine arguments, rates and output stage (_output's hash), or undef when no stage is the
+# engine of player $id. $srcRate is LMS's view of the track, as measure's $fallbackRate; a DSF out's rate as the engine
+# takes it (_dsdOut, the player's settings where the command does not say). No /proc, so on every platform; LMS 9.2's
+# now playing reads it at each stream's start (NowPlaying.pm).
+sub streamOutput {
+    my ( $command, $id, $srcRate, $client ) = @_;
+    my $want = '--clientid=' . lc( $id // '' );
+    my ( @stages, $a );
+    for my $argv ( stagesOf($command) ) {
+        my $isEngine = scalar grep { lc($_) eq $want } @$argv;
+        $a = _engineArgs($argv) if $isEngine;
+        push @stages, { argv => $argv, role => _role( $argv, $isEngine ) };
+    }
+    return undef unless $a;
+    my ( undef, $dspRate ) = _rates( $a, $srcRate );
+    my $dsf = uc( $a->{formatout} // '' ) eq 'DSF' ? _dsdOut( $client, $srcRate, $a ) : undef;
+    return _output( $stages[-1], { %$a, samplerate => $dspRate }, $dsf );
+}
+
 # The running pipeline of one player, measured: its stages (role, CPU), the engine's own speed, what it was
 # told to do, and the audio it has processed (with no /proc: the engine's report alone, _reportOnly).
 # $fallbackRate is LMS's view of the track, for the one
@@ -432,12 +495,8 @@ sub measure {
 
     my $e = $stages[$engineIdx];
     my $a = _engineArgs( $e->{argv} );
-    # native DSD (--samplerate=native, the native round): the DSP at the source's DSD rate, LMS's view of the track
-    my $native = lc( $a->{samplerate} // '' ) eq 'native';
-    my $rate = $native ? $fallbackRate : $a->{samplerate} // $fallbackRate;
+    my ( $rate, $dspRate ) = _rates( $a, $fallbackRate );
     my $ch = $a->{channels} // 2;
-    # the rate the DSP runs at: the converter's (--upsample: the engine upsamples itself, 0.3.19), else the input's
-    my $dspRate = ( $a->{upsample} // '' ) =~ /^\d+$/ && uc( $a->{formatin} // '' ) ne 'DSD' ? 0 + $a->{upsample} : $rate;
 
     # the audio that crossed the engine's output pipe: the stage after it read exactly those bytes
     # (the engine's own count also holds its log writes); a WAV output is 24-bit at the rate the engine writes, the
@@ -491,7 +550,7 @@ sub measure {
         stages    => \@out,
         resampler => $res,
         dsp       => { rate => $dspRate, bitsin => $a->{bitsin}, float => ( ( $a->{bitsin} // 0 ) == 32 ? 1 : 0 ) },
-        output    => _output( ( grep { $_->{role} ne 'wavlength' } @stages )[-1], { %$a, samplerate => $dspRate }, $dsf ),
+        output    => _output( $stages[-1], { %$a, samplerate => $dspRate }, $dsf ),
     };
 }
 

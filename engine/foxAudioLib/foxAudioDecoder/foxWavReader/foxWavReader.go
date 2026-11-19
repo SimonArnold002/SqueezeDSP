@@ -13,12 +13,13 @@ import (
 	"io"
 	"math"
 	"math/bits"
+	"os"
 
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
+	"github.com/Foxenfurter/foxAudioLib/gipsySpeed"
 	"github.com/google/uuid"
 )
 
@@ -45,9 +46,9 @@ type WavReader struct {
 	IgnoreDataLength bool
 	Length           uint32
 
-	// Meter (SqueezeDSP fork): the conversion's own time, for the engine's speed (foxSpeed); the reads, which wait
+	// Meter (SqueezeDSP fork): the conversion's own time, for the engine's speed (gipsySpeed); the reads, which wait
 	// for whatever feeds the engine, and the sends, which wait for the next stage, are left out
-	Meter *foxSpeed.Meter
+	Meter *gipsySpeed.Meter
 }
 
 // Holds detailed information about the wav Header
@@ -996,11 +997,13 @@ func (fd *WavReader) DecodeWavHeader() error {
 		w.max = uint32(float64(w.dataSize) / (float64(w.bitsPerSample) / 8) / float64(w.numChannels))
 		//w.max = uint32((uint32(w.dataSize) / (uint32(w.bitsPerSample / 8))) / uint32(w.numChannels))
 		if w.dataSize == maxDataSize {
-			fmt.Println(packageName + functionName + ": Wave file: unknown size from header")
+			// SqueezeDSP fork: to stderr; stdout is the audio (ledger THE ENGINE PRINTS INTO THE AUDIO)
+			fmt.Fprintln(os.Stderr, packageName+functionName+": Wave file: unknown size from header")
 			w.max = math.MaxUint32
 		}
 		if w.max == 0 {
-			fmt.Println(packageName + functionName + ":Wave file: zero size from header")
+			// SqueezeDSP fork: to stderr; stdout is the audio (ledger THE ENGINE PRINTS INTO THE AUDIO)
+			fmt.Fprintln(os.Stderr, packageName+functionName+":Wave file: zero size from header")
 			w.max = math.MaxUint32
 			fd.IgnoreDataLength = true
 		}

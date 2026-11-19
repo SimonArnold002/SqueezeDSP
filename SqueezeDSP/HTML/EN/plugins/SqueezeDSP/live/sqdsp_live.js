@@ -34,6 +34,10 @@
         if (text !== undefined && text !== null) { e.textContent = text; }
         return e;
     }
+    // an element's help on hover (none when empty): shown by the page's own box (tipStart), never the browser's title
+    function tip(el, text) {
+        if (text) { el.dataset.tip = text; } else { delete el.dataset.tip; }
+    }
     function rate(hz) {
         hz = num(hz, 0);
         if (!hz) { return ''; }
@@ -68,7 +72,7 @@
     // InitialiseData), so a player first set up here gets the same file. Keep them in step.
     function defaults() {
         return {
-            Bypass: 1, OutputFormat: 'FLAC', Upsample: 'off', DSDCutoff: 30000, DSDGain: 0,
+            Bypass: 1, ExactLength: 0, OutputFormat: 'FLAC', Upsample: 'off', DSDCutoff: 30000, DSDGain: 0,
             UpsampleDSDRate: 2822400, UpsampleFilterCD: 'short-int', UpsampleFilterHiRes: 'short-lin', DSDOut: 0, DSDOutMod: 'standard',
             DSDOutDSP: 352800, DSDIntegrator: 'lin', UpsamplePCMFilterCD: 'short-int', UpsamplePCMFilterHiRes: 'short-lin',
             UpsampleTarget: 'family', UpsampleMax: 0, Preamp: 0, Balance: 0, Width: 0,
@@ -121,19 +125,20 @@
     // for hi-res; the converter to DSD's own (0.1.72.33) and PCM's own (0.1.72.37; Simon 2026-11-04: "Separate for PCM"),
     // with the defaults Simon asked for ("defaults set to what we consider best": ledger STAGE 1 STUDY). Since 0.1.72.44
     // the filter family, one dropdown each (Simon 2026-11-06: "choose the filters from a drop down ... the name, lenght and
-    // phase"), in the engine's order: [value, family, length, phase]; Kaiser's values as before
+    // phase"), in the engine's order: [value, family, length, phase]; Kaiser's values as before. Each length's phases
+    // linear to minimum, the linear-leaning intermediates (80% and 70% linear, 2026-11-15) between
     var FILTERS = (function () {
         var out = [];
         [['', 'kaiser', ['short', 'long', 'xlong']], ['gauss-', 'gauss', ['short', 'medium', 'long']],
          ['halfband-', 'halfband', ['']], ['slow-', 'slow', ['']]].forEach(function (f) {
             f[2].forEach(function (l) {
-                ['lin', 'int', 'min'].forEach(function (p) { out.push([f[0] + (l ? l + '-' : '') + p, f[1], l, p]); });
+                ['lin', 'int80', 'int70', 'int', 'min'].forEach(function (p) { out.push([f[0] + (l ? l + '-' : '') + p, f[1], l, p]); });
             });
         });
         out.push(['nonring', 'nonring', '', '']);
         return out;
     })();
-    var FILTER_PHASE_NAMES = { lin: 'Linear', int: 'Intermediate', min: 'Minimum' };
+    var FILTER_PHASE_NAMES = { lin: 'Linear', int80: 'Intermediate 80%', int70: 'Intermediate 70%', int: 'Intermediate', min: 'Minimum' };
     var FILTER_DEFAULTS = { UpsampleFilterCD: 'short-int', UpsampleFilterHiRes: 'short-lin',
                             UpsamplePCMFilterCD: 'short-int', UpsamplePCMFilterHiRes: 'short-lin' };
     // the settings' tabs, in Simon's order (2026-11-03: "Presets first then DSP, then the rest as they are")
@@ -216,8 +221,11 @@
                 // native DSD out: a player that lists dsf itself, its output not a reduced stream (an older server: none)
                 dsdOutOk: num(r.dsd_out_ok, 0) === 1,
                 // the Sample Rate Converter to DSD: DSD out, and the resampler (an older server: none)
-                upDsdOk: num(r.up_dsd_ok, 0) === 1
+                upDsdOk: num(r.up_dsd_ok, 0) === 1,
+                // LMS's "Prefer native format", which SqueezeDSP needs off (an older server: none)
+                preferNative: num(r.prefer_native, 0) === 1
             };
+            renderNative();
             // a change of ours went out after this was asked for, or is still going out
             if (gen !== GEN || SAVE.busy) { renderControls(); return; }
             var server = {};
@@ -409,11 +417,23 @@
         }
         UI = {};
 
+        // LMS's "Prefer native format" on: a red bar above everything, on every tab, with a button that turns it off
+        // through LMS's own `pref` command (Simon 2026-11-08); shown only while the server says it is on
+        UI.native = make('div', 'card nativebar hide');
+        UI.native.appendChild(make('span', 'nativebar-t', L.preferNative || '"Prefer native format" is on in LMS\'s File Types settings. SqueezeDSP needs it off.'));
+        UI.nativeOff = UI.native.appendChild(make('button', 'btn nativebar-b', L.preferNativeOff || 'Turn it off'));
+        UI.nativeOff.type = 'button';
+        UI.nativeOff.addEventListener('click', nativeOff);
+        app.appendChild(UI.native);
+
         // DSP on or off, first, so every tab has it (Simon 2026-11-05: "The DSP on button needs to move to top of UI so
         // its availble on each page like the classic menu"); its settings stay on the DSP tab
         var db = make('div', 'card dspbar');
         UI.dsp = control(db, 'dsp', L.dsp || 'DSP', L.dspHelp);
         UI.dspSw = UI.dsp.c.appendChild(switchButton(function (on) { change('Bypass', on ? 0 : 1); }));
+        // "Exact track length" (the player's own, Simon 2026-11-15): beside the DSP switch, dimmed while the DSP is off
+        UI.exact = control(db, 'exact', L.exact || 'Exact track length', L.exactHelp);
+        UI.exactSw = UI.exact.c.appendChild(switchButton(function (on) { change('ExactLength', on ? 1 : 0); }));
         app.appendChild(db);
 
         // the signal path, and its speed as the headline
@@ -457,7 +477,7 @@
             b.type = 'button';
             b.setAttribute('role', 'tab');
             b.dataset.t = t;
-            if (titles[t]) { b.title = titles[t]; }
+            tip(b, titles[t]);
             b.addEventListener('click', function () { showTab(t); });
             bar.appendChild(b);
             UI.tabs[t] = b;
@@ -467,7 +487,7 @@
             var p = make('div', 'card tabpane');
             p.dataset.t = key;
             var h = p.appendChild(make('h2', null, title));
-            if (help) { h.title = help; }
+            tip(h, help);
             app.appendChild(p);
             UI.panes[key] = p;
             return p;
@@ -570,6 +590,7 @@
         UI.out = control(pp, 'output', L.output || 'Output', L.outputHelp);
         UI.outSeg = segment(UI.out.c, [['FLAC', 'FLAC 24-bit'], ['PCM', 'PCM (WAV 24-bit)']],
                             function (v) { change('OutputFormat', v); });
+        tip(UI.outSeg.PCM, L.outputWavHelp);   // WAV's 4 GB limit, on the WAV button
 
         // DSD Processing: the output (with the converter off), the decoder, the encoder
         var dp = pane('dsd', L.dsdProc || 'DSD Processing Settings', L.dsdProcHelp);
@@ -613,6 +634,7 @@
         app.appendChild(more);
 
         UI.dsp.row.classList.add('sw-row');
+        UI.exact.row.classList.add('sw-row');
         var saved = null;
         try { saved = window.localStorage.getItem('sqdsp-tab'); } catch (e) { saved = null; }
         showTab(TAB || saved || 'presets');
@@ -688,7 +710,7 @@
         var row = make('div', 'ctl' + (sub ? ' sub-ctl' : ''));
         row.dataset.k = key;
         var k = row.appendChild(make('div', 'k', label));
-        if (help) { k.title = help; }
+        tip(k, help);
         var c = row.appendChild(make('div', 'c'));
         var note = row.appendChild(make('div', 'note'));
         parent.appendChild(row);
@@ -810,17 +832,36 @@
         return '';
     }
 
+    // the red bar: shown while the server reports "Prefer native format" on
+    function renderNative() {
+        if (!UI || !UI.native) { return; }
+        UI.native.classList.toggle('hide', !(CAN && CAN.preferNative));
+        UI.nativeOff.disabled = false;
+    }
+
+    // its button: LMS's own `pref` command (no player), then the settings read again, so the bar goes once it is off
+    function nativeOff() {
+        if (!UI || !UI.nativeOff) { return; }
+        UI.nativeOff.disabled = true;
+        rpc('', ['pref', 'prioritizeNative', '0']).then(function () { return loadSettings(); },
+            function () { return loadSettings(); }).then(renderNative, renderNative);
+    }
+
     function renderControls() {
         if (!UI) { return; }
+        renderNative();
         var c = client(), can = CAN;
         var ready = !!(c && can);
         Object.keys(UI.panes).forEach(function (k) { if (k !== 'presets') { UI.panes[k].classList.toggle('dimmed', !ready); } });
         if (!ready) {
             UI.dspSw.disabled = true;
+            UI.exactSw.disabled = true;
             return;
         }
         var dspOn = String(c.Bypass) === '0';
         setSwitch(UI.dspSw, dspOn && can.dspOk, !can.dspOk);
+        setSwitch(UI.exactSw, String(c.ExactLength) === '1', !can.dspOk);
+        UI.exact.row.classList.toggle('dimmed', !(dspOn && can.dspOk));
         UI.dsp.note.textContent = can.dspOk ? '' : (L.noDsp || '');
 
         // the Sample Rate Converter as the server runs it (effective): one it cannot run shows as off, and says why
@@ -828,8 +869,8 @@
         var want = e.want, mode = e.mode;
         var noDsd = !can.dsdOutOk ? (can.outReduced ? (L.dsdOutNoReduced || '') : (L.dsdOutNoDsf || '')) : whyNoUpsample(can);
         setSegment(UI.srcSeg, mode, [].concat(can.upOk ? [] : ['pcm'], can.upDsdOk ? [] : ['dsd']));
-        UI.srcSeg.pcm.title = can.upOk ? '' : whyNoUpsample(can);
-        UI.srcSeg.dsd.title = can.upDsdOk ? '' : noDsd;
+        tip(UI.srcSeg.pcm, can.upOk ? '' : whyNoUpsample(can));
+        tip(UI.srcSeg.dsd, can.upDsdOk ? '' : noDsd);
         UI.upOpts.classList.toggle('hide', mode !== 'pcm');
         UI.dsdOpts.classList.toggle('hide', mode !== 'dsd');
         var ur = upRates(e.limit, e.max), note = '';
@@ -881,6 +922,7 @@
         [UI.srcOffNote, UI.pcmOffNote, UI.dsdOffNote].forEach(function (n) { n.textContent = dspOn ? '' : (L.dspOffTab || ''); });
         Object.keys(UI.sliders).forEach(function (k) { UI.sliders[k].ctl.row.classList.toggle('dimmed', !dspOn); });
         renderSliders();
+        tipRefresh();   // a greyed button's why may have changed
     }
 
     // the DSD settings as the engine takes them (LyrionDSPSettings buildConfig): unset or out of range, its default
@@ -976,6 +1018,7 @@
         }
         UI.statusNote.textContent = note;
         renderClip();
+        tipRefresh();   // the clipping dots are new elements now
 
         // figures: a running pipeline's, or a finished one's last (none when the page never saw it)
         var figures = !!(STATUS && (p.running || p.finished) && p.stages);
@@ -1006,7 +1049,7 @@
             var r = p.resampler;
             if (r && r.tool === 'engine') {
                 // the converter to DSD (0.1.72.33): the engine took the track up itself, by the filter for its rate
-                row('up', filterName(r.filter) + ' → ' + rate(r.target) + ' (' + (L.engineUp || 'the engine') + ')');
+                row('up', filterName(r.filter) + ' → ' + rate(r.target));
             } else if (r && r.tool === 'decoder') {
                 // our engine's own DSD decode (0.3.13): its low-pass and gain, as the engine takes them (Status _dsdSettings)
                 var dd = [L.dsdDecoder || 'Our decoder',
@@ -1087,10 +1130,10 @@
         box.appendChild(make('span', null, fmt(cls === 'clip' ? (L.clipYes || 'Clipped: last track\'s peak %s')
                                                               : (L.clipNone || 'None: last track\'s peak %s'), db)));
         var hist = box.appendChild(make('span', 'pkhist'));
-        hist.title = L.clipHistory || '';
+        tip(hist, L.clipHistory);
         PEAKS.forEach(function (p) {
             var d = hist.appendChild(make('span', 'pk ' + trackClass(p, rg)));
-            d.title = (p.v > 0 ? '+' : '') + p.v.toFixed(1) + ' dBFS';
+            tip(d, (p.v > 0 ? '+' : '') + p.v.toFixed(1) + ' dBFS');
         });
     }
 
@@ -1154,6 +1197,75 @@
         });
     }
 
+    // ---------------------------------------------------------------- help on hover
+    // Simon 2026-11-16: "Tool tips dont seem to be working in the new interface". The help was the browser's own title
+    // tooltip, which never showed for him (in Material's frame); the classic page's, drawn by the page, does. So the page
+    // draws this one too: one box, shown a moment after the pointer rests on an element with data-tip (tip()), under
+    // it (above it near the window's foot), kept inside the window. A greyed button takes no pointer
+    // (.seg button:disabled), so its why is found among the children of what is under the pointer, by position.
+    var TIP = { box: null, el: null, quiet: null, x: -1, y: -1, timer: null };
+    var TIP_DELAY = 200;
+
+    function tipTarget(node, x, y) {
+        if (!node || node.nodeType !== 1) { return null; }
+        var el = node.closest('[data-tip]');
+        if (el) { return el; }
+        var kids = node.querySelectorAll('[data-tip]');
+        for (var i = 0; i < kids.length; i++) {
+            var r = kids[i].getBoundingClientRect();
+            if (r.width && x >= r.left && x < r.right && y >= r.top && y < r.bottom) { return kids[i]; }
+        }
+        return null;
+    }
+    function tipHide() {
+        clearTimeout(TIP.timer);
+        TIP.el = null;
+        if (TIP.box) { TIP.box.classList.remove('on'); }
+    }
+    function tipShow(el) {
+        var b = TIP.box, m = 8;
+        TIP.el = el;
+        b.textContent = el.dataset.tip;
+        b.classList.add('on');
+        var r = el.getBoundingClientRect(), w = b.offsetWidth, h = b.offsetHeight;
+        var top = r.bottom + 6;
+        if (top + h > window.innerHeight - m) { top = Math.max(m, r.top - h - 6); }
+        b.style.left = Math.max(m, Math.min(r.left, window.innerWidth - w - m)) + 'px';
+        b.style.top = top + 'px';
+    }
+    function tipAt(node, x, y) {
+        TIP.x = x; TIP.y = y;
+        var el = tipTarget(node, x, y);
+        if (el !== TIP.quiet) { TIP.quiet = null; }
+        if (el && el === TIP.quiet) { return; }
+        if (el === TIP.el) { return; }
+        tipHide();
+        if (!el) { return; }
+        TIP.el = el;
+        TIP.timer = setTimeout(function () { if (TIP.el === el && el.isConnected && el.dataset.tip) { tipShow(el); } }, TIP_DELAY);
+    }
+    // a redraw may have replaced what the pointer rests on, or changed its help: look again where it is
+    function tipRefresh() {
+        if (!TIP.box || TIP.x < 0) { return; }
+        var on = TIP.box.classList.contains('on');
+        var el = tipTarget(document.elementFromPoint(TIP.x, TIP.y), TIP.x, TIP.y);
+        if (!el || el === TIP.quiet) { tipHide(); return; }
+        if (on) { tipShow(el); return; }
+        if (el !== TIP.el) { tipAt(el, TIP.x, TIP.y); }
+    }
+    function tipStart() {
+        TIP.box = document.body.appendChild(make('div', 'tipbox'));
+        TIP.box.setAttribute('role', 'tooltip');
+        document.addEventListener('mouseover', function (e) { tipAt(e.target, e.clientX, e.clientY); });
+        document.addEventListener('mousemove', function (e) { tipAt(e.target, e.clientX, e.clientY); });
+        // out of the window: nothing under the pointer any more
+        document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) { TIP.x = -1; TIP.quiet = null; tipHide(); } });
+        // a press puts it away, and it stays away until the pointer leaves that element
+        document.addEventListener('mousedown', function (e) { TIP.quiet = tipTarget(e.target, e.clientX, e.clientY); tipHide(); }, true);
+        window.addEventListener('scroll', tipHide, true);
+        window.addEventListener('blur', tipHide);
+    }
+
     // ---------------------------------------------------------------- start
     // Back to Material: only when standalone. Framed, Material's own dialog has its close, and
     // the only way out of a frame (window.top.location) would throw the whole app away.
@@ -1172,6 +1284,7 @@
         }
     }
 
+    tipStart();
     build();
     poll();
 

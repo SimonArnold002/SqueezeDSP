@@ -18,14 +18,14 @@ import (
 	"time"
 
 	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder"
-	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/foxDSDReader"
+	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/gipsyDSDReader"
 	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder"
-	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/foxDSDEncoder"
+	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/gipsyDSDEncoder"
 	foxConvolver "github.com/Foxenfurter/foxAudioLib/foxConvolverPartition"
 	"github.com/Foxenfurter/foxAudioLib/foxLog"
 	"github.com/Foxenfurter/foxAudioLib/foxResampler"
-	"github.com/Foxenfurter/foxAudioLib/foxSpeed"
-	"github.com/Foxenfurter/foxAudioLib/foxUpsampler"
+	"github.com/Foxenfurter/foxAudioLib/gipsySpeed"
+	"github.com/Foxenfurter/foxAudioLib/gipsyUpsampler"
 
 	"github.com/Foxenfurter/foxAudioLib/foxFilters"
 	"github.com/Foxenfurter/foxAudioLib/foxUtils"
@@ -66,22 +66,25 @@ type AudioProcessor struct {
 	CombinedGain      float64
 	//FIRStrengthNorm   float64
 	ChannelGains []float64
-	// the converter (SqueezeDSP fork): a PCM source upsampled here, before the DSP, to --upsample (foxUpsampler).
+	// the converter (SqueezeDSP fork): a PCM source upsampled here, before the DSP, to --upsample (gipsyUpsampler).
 	// ProcRate is the rate the DSP and the encoder run at: the decoder's, or --upsample's.
-	Upsampler *foxUpsampler.Upsampler
+	Upsampler *gipsyUpsampler.Upsampler
 	ProcRate  int
 	// the stages' meters for the engine's own speed (attachMeters), those this package's stages keep
-	upMeter, mergeMeter *foxSpeed.Meter
+	upMeter, mergeMeter *gipsySpeed.Meter
 	// (SqueezeDSP fork) every stage's meter, the route's order (attachMeters): each stage's own time, live in the speed
 	// file and at the end in the log (StageTimes)
-	Meters []*foxSpeed.Meter
+	Meters []*gipsySpeed.Meter
 	// (0.1.72.46) the runs the engine's lead makes while it plays (attachMeters, attachLead): its speed after the fill
-	runs *foxSpeed.Runs
+	runs *gipsySpeed.Runs
 	// the plugin's gapless note and what the engine decides from it (gapless.go)
 	gapless gaplessState
+	length  lengthState // the stream's place in the continuous stream, and its exact count (length.go)
+	// flacSeek: a remote FLAC's count, read from its URL beside the set-up (flacseek.go)
+	flacSeek chan flacSeekResult
 }
 
-const CACHE_VERSION = 7 // Increment when changing convolver type (6, SqueezeDSP fork: the convolver's state carries the
+const CACHE_VERSION = 9 // 9: the input's kind, rate and DSD rate, for --tail (tail.go); 8: the stream's place and the frames past its cut, length.go; Increment when changing convolver type (6, SqueezeDSP fork: the convolver's state carries the
 // input a track ended with short of a partition, for an exact gapless join; 7: whether the track held its state for
 // the next, and the upsampler's, gapless.go)
 type DSPResidualsCache struct {
@@ -99,8 +102,19 @@ type DSPResidualsCache struct {
 	Held      bool
 	Upsampler []byte
 	Encoder   []byte // DSF out's
-	Reader    []byte // a DSD source's decode (foxDSDReader), when it stopped at its file's end holding
+	Reader    []byte // a DSD source's decode (gipsyDSDReader), when it stopped at its file's end holding
 	TrackURL  string // the track that wrote it (--trackURL): only the stream that continues that track takes it
+	// (length.go) the continuous stream's place where this track's stream was cut, and the frames the stages sent past
+	// the cut, the next stream's first; EncBits: the DSD samples a channel DSF out held (they count in the next header)
+	Gate            bool
+	GateIn, GateCut int64
+	Pending         [][]float64
+	EncBits         int64
+	// (tail.go) the held track's input, so --tail can open an empty one of the same kind: "pcm" or "dsd", the rate the
+	// decoder handed on (a DSD source's decode rate), a DSD source's own DSD rate
+	InKind    string
+	InRate    int
+	InDSDRate int
 }
 
 // PreviousTrackCache persists only the track identity and gain resolved at the
@@ -360,7 +374,6 @@ func albumPeak(d *LyrionClient.TrackGainResult) *float64 {
 	return d.TrackPeak
 }
 
-
 func fmtGain(f *float64) string {
 	if f == nil {
 		return "n/a"
@@ -462,6 +475,15 @@ func requiresAdapter(format string) bool {
 func (ap *AudioProcessor) Initialize() error {
 	const functionName = "Initialize"
 	errorText := fmt.Sprintf("%s:%s ", packageName, functionName)
+	// a remote FLAC's count from its URL, beside the set-up (flacseek.go); a held tail's empty input (tail.go)
+	ap.flacSeekStart()
+	if ap.Args.Tail {
+		if err := ap.tailInput(); err != nil {
+			ap.Logger.Error(errorText + err.Error())
+			ap.Encoder = &foxAudioEncoder.AudioEncoder{}
+			return err
+		}
+	}
 	// initialise decoder
 	ap.Decoder = &foxAudioDecoder.AudioDecoder{
 		DebugFunc: ap.Logger.Debug,
@@ -493,8 +515,10 @@ func (ap *AudioProcessor) Initialize() error {
 		ap.Decoder.BitDepth = ap.Args.PCMBits
 		ap.Decoder.NumChannels = ap.Args.PCMChannels
 		ap.Decoder.BigEndian = ap.Args.BigEndian
+		// a 0 from LMS (it knew no more of a remote track yet): the remote FLAC's own (flacseek.go)
+		ap.rawFormatFromURL()
 	case "DSD":
-		// a DSF or DSDIFF file, decoded by the engine itself to --samplerate (foxDSDReader)
+		// a DSF or DSDIFF file, decoded by the engine itself to --samplerate (gipsyDSDReader)
 		ap.Decoder.Type = "DSD"
 		ap.Decoder.SampleRate = ap.Args.InputSampleRate
 		// the player's settings, unless the command line gives its own
@@ -542,7 +566,7 @@ func (ap *AudioProcessor) Initialize() error {
 				rate, ap.Decoder.DSDReader.DSDRate))
 			ap.Decoder.Close()
 			ap.Decoder.DSDReader = nil
-			ap.Decoder.DSDNative, ap.Decoder.SampleRate = false, foxDSDReader.DXD
+			ap.Decoder.DSDNative, ap.Decoder.SampleRate = false, gipsyDSDReader.DXD
 			err = ap.Decoder.Initialise()
 		}
 	}
@@ -561,18 +585,18 @@ func (ap *AudioProcessor) Initialize() error {
 	}*/
 	ap.Logger.Debug(errorText + fmt.Sprintf("Decoder initialised: SampleRate=%d, NumChannels=%d, BitDepth=%d", ap.Decoder.SampleRate, ap.Decoder.NumChannels, ap.Decoder.BitDepth))
 	// the converter: a PCM source goes up to --upsample here, before the DSP, by our own two-stage filters
-	// (foxUpsampler; the player's choice for a CD-rate source, another for hi-res); from here on everything runs at
+	// (gipsyUpsampler; the player's choice for a CD-rate source, another for hi-res); from here on everything runs at
 	// ProcRate. A source already at that rate passes as it is.
 	ap.ProcRate = ap.Decoder.SampleRate
 	if ap.Args.UpsampleRate > 0 && ap.Args.UpsampleRate != ap.Decoder.SampleRate {
-		u, err := foxUpsampler.New(ap.Decoder.SampleRate, ap.Args.UpsampleRate, ap.Decoder.NumChannels, ap.Args.UpFilterCD, ap.Args.UpFilterHiRes)
+		u, err := gipsyUpsampler.New(ap.Decoder.SampleRate, ap.Args.UpsampleRate, ap.Decoder.NumChannels, ap.Args.UpFilterCD, ap.Args.UpFilterHiRes)
 		if err != nil {
 			ap.Encoder = &foxAudioEncoder.AudioEncoder{}
 			return err
 		}
 		ap.Upsampler, ap.ProcRate = u, ap.Args.UpsampleRate
 		ap.Logger.Debug(errorText + fmt.Sprintf("Upsample: %d to %d Hz, %s (%s source), stage A %d taps, stage B %d, delay %.2f samples taken off",
-			u.InRate, u.OutRate, u.Choice, map[bool]string{false: "CD-rate", true: "hi-res"}[foxUpsampler.IsHiRes(u.InRate)], u.TapsA, u.TapsB, u.Delay))
+			u.InRate, u.OutRate, u.Choice, map[bool]string{false: "CD-rate", true: "hi-res"}[gipsyUpsampler.IsHiRes(u.InRate)], u.TapsA, u.TapsB, u.Delay))
 	}
 	targetSampleRate := ap.ProcRate
 	// we use the processing Mode and the sample rate to create appropriate buffer sizes using a util function.
@@ -775,6 +799,8 @@ func (ap *AudioProcessor) Initialize() error {
 	ap.PrepareChannelGains()
 	// the most the stages' tails come to, which a stream that nothing follows ends with (gapless.go)
 	ap.gaplessTail()
+	// the stream's place in the continuous stream, and its count if the input's is known (length.go)
+	ap.lengthStart()
 
 	// initialise encoder
 
@@ -807,7 +833,7 @@ func (ap *AudioProcessor) Initialize() error {
 		switch {
 		case ap.Args.WavLength > 0:
 			// the plugin's statement of what is left to play, LMS's duration with a margin (a stream's is whole
-			// seconds): an upper bound, so the stream ends with the input (foxDSDEncoder Bounded)
+			// seconds): an upper bound, so the stream ends with the input (gipsyDSDEncoder Bounded)
 			ap.Encoder.Frames = int64(ap.Args.WavLength*float64(ap.ProcRate) + 0.5)
 			ap.Encoder.Bounded = true
 		case ap.Decoder.DSDReader != nil:
@@ -823,6 +849,24 @@ func (ap *AudioProcessor) Initialize() error {
 		if ap.noteMode() && ap.Encoder.Frames > 0 {
 			ap.Encoder.Frames += 2 * ap.gapless.tailOut
 			ap.Encoder.Bounded = true
+		}
+		// the exact-length round (length.go): the input's count is known, so the header states the stream's DSD samples
+		// to the sample: what the last track's encoder held for this one, this stream's frames, up to a whole group of
+		// 4 bytes a channel (the loop's silence, under 32 samples; squeezelite plays whole groups)
+		if ap.length.exact && rate%ap.ProcRate == 0 {
+			var heldBits int64
+			if res := ap.gapless.res; ap.gapless.carry && res != nil && res.Gate && res.Encoder != nil {
+				heldBits = res.EncBits
+			}
+			ap.Encoder.Frames, ap.Encoder.Bounded = ap.length.stated, false
+			ap.Encoder.DSDCount = (heldBits + ap.length.stated*int64(rate/ap.ProcRate) + 31) / 32 * 32
+			// the exact contract, held (decided at the start): the samples this stream carries, the encoder's own hold
+			// (its interpolator's frames, an adaptive loop's look-ahead) left for the next, down to a whole group
+			if ap.length.fixed && ap.endHold() {
+				hb := gipsyDSDEncoder.HeldBack(rate, ap.ProcRate, kind)
+				ap.Encoder.DSDCount = max(heldBits+ap.length.stated*int64(rate/ap.ProcRate)-hb, 0) / gipsyDSDEncoder.Group * gipsyDSDEncoder.Group
+				ap.Encoder.DSDHeldAt = true
+			}
 		}
 		ap.Logger.Debug(errorText + fmt.Sprintf("DSF out: DSD %d, %s for a %s source, gain %.2f dB, %d frames at %d Hz (at most: %v)",
 			ap.Encoder.DSDRate, ap.Encoder.DSDKind, map[bool]string{false: "DSD", true: "PCM"}[ap.Encoder.DSDSource == "pcm"],
@@ -857,6 +901,14 @@ func (ap *AudioProcessor) Initialize() error {
 			if s := ap.Encoder.Size + 2*ap.gapless.tailOut*frameBytes; s <= maxSafeSize {
 				ap.Encoder.Size = s
 			} else {
+				ap.Encoder.Size = 0
+			}
+		}
+		// the exact-length round (length.go): the input's count is known, so the header states the stream's frames;
+		// past what a WAV can state, unknown
+		if ap.length.exact {
+			frameBytes := int64(ap.Decoder.NumChannels) * int64(ap.Args.OutBits/8)
+			if ap.Encoder.Size = ap.length.stated * frameBytes; ap.Encoder.Size > maxSafeSize {
 				ap.Encoder.Size = 0
 			}
 		}
@@ -899,6 +951,7 @@ func (ap *AudioProcessor) Initialize() error {
 			}
 		}
 	}
+	ap.lengthReport(false)
 	// Finished
 	return nil
 }
@@ -987,7 +1040,8 @@ func (ap *AudioProcessor) ProcessAudio() {
 	}
 
 	wg.Add(1)
-	go ap.channelSplitter(ap.upsampleStage(ap.tailStage(entry, decodedBuffer, &wg), decodedBuffer, &wg), audioChannels, &wg)
+	go ap.channelSplitter(ap.upsampleStage(ap.tailStage(ap.countStage(entry, decodedBuffer, &wg), decodedBuffer, &wg), decodedBuffer, &wg), audioChannels, &wg)
+	encodeIn := ap.lengthStage(mergedChannel, &wg) // the exact count, the last stage before the encoder (length.go)
 
 	// Convolution setup
 	ap.Logger.Debug(errorText + "Setting up Channel Convolver...")
@@ -1039,7 +1093,7 @@ func (ap *AudioProcessor) ProcessAudio() {
 			ap.Logger.Debug(errorText + fmt.Sprintf("Encoding Done... %d", exitCode))
 			wg.Done()
 		}()
-		err := ap.Encoder.EncodeSamplesChannel(mergedChannel)
+		err := ap.Encoder.EncodeSamplesChannel(encodeIn)
 		if lead != nil { // what the reader has not taken yet, before the encoding is done
 			if cerr := lead.Close(); err == nil && cerr != nil {
 				err = fmt.Errorf("%s:%s: %w", packageName, functionName, cerr)
@@ -1103,41 +1157,41 @@ func (ap *AudioProcessor) ProcessAudio() {
 // attachMeters gives each stage of the route its meter before any of them starts: the decoder's reader (ours for DSD,
 // else the WAV reader, as DecodeSamples picks), the upsampler (with one), with the DSP each channel's convolver and the
 // merger, then the encoder; and the encoder its fill, the engine's speed. The splitter only slices and sends.
-func (ap *AudioProcessor) attachMeters(dsp bool) []*foxSpeed.Meter {
-	dec := &foxSpeed.Meter{Name: "decoder", Rate: ap.Decoder.SampleRate}
+func (ap *AudioProcessor) attachMeters(dsp bool) []*gipsySpeed.Meter {
+	dec := &gipsySpeed.Meter{Name: "decoder", Rate: ap.Decoder.SampleRate}
 	if ap.Decoder.DSDReader != nil {
 		ap.Decoder.DSDReader.Meter = dec
 	} else if ap.Decoder.WavDecoder != nil {
 		ap.Decoder.WavDecoder.Meter = dec
 	}
-	ms := []*foxSpeed.Meter{dec}
+	ms := []*gipsySpeed.Meter{dec}
 	ap.upMeter, ap.mergeMeter = nil, nil
 	if ap.Upsampler != nil {
-		ap.upMeter = &foxSpeed.Meter{Name: "upsampler", Rate: ap.ProcRate}
+		ap.upMeter = &gipsySpeed.Meter{Name: "upsampler", Rate: ap.ProcRate}
 		ms = append(ms, ap.upMeter)
 	}
 	if dsp {
 		for i, c := range ap.Convolvers {
-			c.Meter = &foxSpeed.Meter{Name: fmt.Sprintf("convolver %d", i+1), Rate: ap.ProcRate}
+			c.Meter = &gipsySpeed.Meter{Name: fmt.Sprintf("convolver %d", i+1), Rate: ap.ProcRate}
 			ms = append(ms, c.Meter)
 		}
-		ap.mergeMeter = &foxSpeed.Meter{Name: "merger", Rate: ap.ProcRate}
+		ap.mergeMeter = &gipsySpeed.Meter{Name: "merger", Rate: ap.ProcRate}
 		ms = append(ms, ap.mergeMeter)
 	}
-	ap.Encoder.Meter = &foxSpeed.Meter{Name: "encoder", Rate: ap.Encoder.SampleRate}
-	ap.Encoder.Fill = &foxSpeed.Fill{}
-	ap.runs = &foxSpeed.Runs{}
+	ap.Encoder.Meter = &gipsySpeed.Meter{Name: "encoder", Rate: ap.Encoder.SampleRate}
+	ap.Encoder.Fill = &gipsySpeed.Fill{}
+	ap.runs = &gipsySpeed.Runs{}
 	ap.Meters = append(ms, ap.Encoder.Meter)
 	return ap.Meters
 }
 
-// attachLead (0.1.72.46): with the encoder writing stdout itself, its writes go through a lead (foxSpeed.Lead), its runs
+// attachLead (0.1.72.46): with the encoder writing stdout itself, its writes go through a lead (gipsySpeed.Lead), its runs
 // from LeadLow seconds to LeadRun more than the pipeline holds (up to LeadMax), timed by ap.runs (entryStage); nil
 // without one. Not on Windows: there LMS runs
 // every pipeline through its socketwrapper, which gives each process 2 s once the first in the pipeline has ended, then
 // ends it (socketwrapper.cpp, tidy: waittimeout 2000, TerminateProcess), and the reader takes a lead at the player's
 // pace, so a track's last seconds would be cut. There the fill alone, as before.
-func (ap *AudioProcessor) attachLead() *foxSpeed.Lead {
+func (ap *AudioProcessor) attachLead() *gipsySpeed.Lead {
 	if runtime.GOOS == "windows" || !ap.Encoder.WritesStdout() {
 		return nil
 	}
@@ -1148,12 +1202,12 @@ func (ap *AudioProcessor) attachLead() *foxSpeed.Lead {
 	if bps <= 0 {
 		return nil
 	}
-	lead := foxSpeed.NewLead(os.Stdout, bps, foxSpeed.LeadLow, foxSpeed.LeadRun, foxSpeed.LeadMax, ap.runs)
+	lead := gipsySpeed.NewLead(os.Stdout, bps, gipsySpeed.LeadLow, gipsySpeed.LeadRun, gipsySpeed.LeadMax, ap.runs)
 	ap.Encoder.Out = lead
 	return lead
 }
 
-// entryStage (0.1.72.46): the decoder's blocks passed on, each told to the runs (foxSpeed.Runs.In) with the time the
+// entryStage (0.1.72.46): the decoder's blocks passed on, each told to the runs (gipsySpeed.Runs.In) with the time the
 // pipeline took it in, once the next has gone in: the input's last block, often short, never counts (the time to take
 // it in is a whole block's). Its end told too (Runs.End).
 func (ap *AudioProcessor) entryStage(in chan [][]float64, wg *sync.WaitGroup) chan [][]float64 {
@@ -1190,7 +1244,7 @@ type stageTime struct {
 }
 
 // stageTimes: each metered stage's own time so far, in the route's order; a stage with no audio yet left out.
-func stageTimes(meters []*foxSpeed.Meter) []stageTime {
+func stageTimes(meters []*gipsySpeed.Meter) []stageTime {
 	var out []stageTime
 	for _, m := range meters {
 		if a, b := m.Figures(); a > 0 {
@@ -1221,19 +1275,19 @@ type speedFigures struct {
 }
 
 // reportSpeed: from its start and every second while the engine runs, its own speed for the SqueezeDSP page
-// (Status.pm): its pid; its speed, the runs' of the last RunsKeep (0.1.72.46: foxSpeed.Runs, the engine refilling its
-// lead flat out while it plays) once there are any, else its fill's (foxSpeed.Fill: the audio it wrote flat out at the
+// (Status.pm): its pid; its speed, the runs' of the last RunsKeep (0.1.72.46: gipsySpeed.Runs, the engine refilling its
+// lead flat out while it plays) once there are any, else its fill's (gipsySpeed.Fill: the audio it wrote flat out at the
 // stream's start and the time that took, its waits for the player left out); whether the fill is over; the runs
-// measured; and its busiest stage by its own work (foxSpeed.Slowest of the meters), the one to speed up. Neither the
+// measured; and its busiest stage by its own work (gipsySpeed.Slowest of the meters), the one to speed up. Neither the
 // processes' CPU (the engine spreads its stages over cores), nor its output's timing once the player paces it (the
 // stages before the output work while it waits), nor any stage's own time (the stages wait on each other) says how
 // fast it can run (ledger THE PAGE'S SPEED WAS PER CPU-SECOND). Written whole, then renamed.
-func (ap *AudioProcessor) reportSpeed(meters []*foxSpeed.Meter) (stop func()) {
+func (ap *AudioProcessor) reportSpeed(meters []*gipsySpeed.Meter) (stop func()) {
 	fill, runs := ap.Encoder.Fill, ap.runs
 	return reportSpeedTo(filepath.Join(ap.AppSettings.TempDataFolder, "speed_"+ap.Args.CleanClientID+".json"),
 		func() (speedFigures, bool) {
 			var f speedFigures
-			f.Stage, _, _, _ = foxSpeed.Slowest(meters...)
+			f.Stage, _, _, _ = gipsySpeed.Slowest(meters...)
 			f.Audio, f.Busy, f.Over = fill.Figures()
 			ra, rs, n := runs.Figures()
 			if rs > 0 {
@@ -1486,7 +1540,7 @@ func (ap *AudioProcessor) Terminate() {
 	peakDBFS := PeakDBFS(ap.Encoder.Peak)
 	if d := ap.Encoder.DSDEncoder; d != nil {
 		ap.Logger.Info(fmt.Sprintf("%s: DSF out (cut short): peak %.4f of full swing, %d samples limited at %.2f, %d modulator resets",
-			packageName, d.Peak, d.Limited, foxDSDEncoder.Limit, d.Resets))
+			packageName, d.Peak, d.Limited, gipsyDSDEncoder.Limit, d.Resets))
 	}
 	ErrorText := fmt.Sprintf("%s:%s: ", packageName, functionName)
 	ap.Logger.Info(ErrorText + "Closing because of output termination...")
@@ -1551,7 +1605,7 @@ func (ap *AudioProcessor) ByPassProcess() {
 	DecodedSamplesChannel := make(chan [][]float64, 1)
 	finishedChannel := make(chan bool, 1)
 	meters := ap.attachMeters(false)
-	encodeIn := ap.upsampleStage(DecodedSamplesChannel, 1, &wg)
+	encodeIn := ap.lengthStage(ap.upsampleStage(ap.countStage(DecodedSamplesChannel, 1, &wg), 1, &wg), &wg)
 
 	// Encoding
 	wg.Add(1)
@@ -1738,6 +1792,14 @@ func (ap *AudioProcessor) SaveDSPResiduals(Duration float64, processingTime floa
 					return err
 				}
 				cache.Encoder = s
+				cache.EncBits = d.HeldBits()
+			}
+			if g := &ap.length; g.on && g.held {
+				cache.Gate, cache.GateIn, cache.GateCut, cache.Pending = true, g.cumIn, g.cut, g.keep
+			}
+			cache.InKind, cache.InRate = "pcm", ap.Decoder.SampleRate
+			if rd := ap.Decoder.DSDReader; rd != nil {
+				cache.InKind, cache.InDSDRate = "dsd", rd.DSDRate
 			}
 			// a decode that ran to its file's end holding (not a cue sheet's track): the next file goes on from it
 			if rd := ap.Decoder.DSDReader; rd != nil {

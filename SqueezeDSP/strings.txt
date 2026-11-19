@@ -20,11 +20,20 @@ PLUGIN_SQUEEZEDSP_BYPASS
 PLUGIN_SQUEEZEDSP_BYPASS_HELP
 	EN	DSP Off/On - Selecting On will enable DSP processing and selecting Off will bypass all DSP processing. This may be useful if you have multiple players and only want SqueezeDSP active on some of them.
 
+PLUGIN_SQUEEZEDSP_EXACTLENGTH
+	EN	Exact track length
+
+PLUGIN_SQUEEZEDSP_EXACTLENGTH_HELP
+	EN	Can help a UPnP or bridged player that gets stuck at the end of a track to progress. Leave disabled for native Slimproto/Squeezelite clients.
+
 PLUGIN_SQUEEZEDSP_OUTPUT
 	EN	Output
 
 PLUGIN_SQUEEZEDSP_OUTPUT_HELP
 	EN	What SqueezeDSP sends to the player after the DSP: 24-bit FLAC (the default, for any player), or 24-bit PCM as WAV, for a player that reads a WAV header (squeezelite started with -W).
+
+PLUGIN_SQUEEZEDSP_OUTPUT_WAV_HELP
+	EN	WAV: due to the format's 4 GB file size limit, not suitable for tracks longer than about 15 min at 705.6/768 kHz, 31 min at 352.8/384 kHz, 62 min at 176.4/192 kHz, 2 h at 88.2/96 kHz or 4 h at 44.1/48 kHz.
 
 PLUGIN_SQUEEZEDSP_PCM_NEEDS_HEADER
 	EN	PCM needs a player that reads a WAV header (squeezelite started with -W). This player gets FLAC.
@@ -40,6 +49,12 @@ PLUGIN_SQUEEZEDSP_UPSAMPLE_NO_REDUCED
 
 PLUGIN_SQUEEZEDSP_NO_DSP_BELOW_FLAC
 	EN	This player cannot take 24-bit FLAC, so SqueezeDSP stays off for it.
+
+PLUGIN_SQUEEZEDSP_PREFER_NATIVE
+	EN	"Prefer native format" is on in LMS's File Types settings. SqueezeDSP needs it off.
+
+PLUGIN_SQUEEZEDSP_PREFER_NATIVE_OFF
+	EN	Turn it off
 
 PLUGIN_SQUEEZEDSP_UPSAMPLE
 	EN	Upsample
@@ -141,7 +156,7 @@ PLUGIN_SQUEEZEDSP_SRC
 	EN	Sample Rate Converter
 
 PLUGIN_SQUEEZEDSP_SRC_HELP
-	EN	Off: every track goes out as it is, PCM at its own rate and a DSD file as DSD Processing's Output says. PCM: every track, DSD included, goes to the player's top rate, in its own family (Per family) or one rate for all (Player max), up to the Max rate. DSD: every track, PCM included, goes out as DSD at the DSD rate you choose (the highest the player and its DAC take), through the DSP at DSD Processing's DSP rate and our own modulator; only for a player that takes native DSD itself (it lists dsf). PCM and DSD each have their own filters, shown with their options: one for a 44.1 or 48 kHz track, one for hi-res, the engine resampling in 64-bit floating point. Each is a filter, its length and its phase. Kaiser and Gaussian remove every image above the track's band; Half-band, Slow roll-off and Non-ringing let some through, for listening (going down in rate they run as Kaiser short). Phase: linear rings evenly before and after a transient; minimum has no ringing before it; intermediate is in between. Length: short rings for the least time; long keeps more of the top of the band flat.
+	EN	Off: every track goes out as it is, PCM at its own rate and a DSD file as DSD Processing's Output says. PCM: every track, DSD included, goes to the player's top rate, in its own family (Per family) or one rate for all (Player max), up to the Max rate. DSD: every track, PCM included, goes out as DSD at the DSD rate you choose (the highest the player and its DAC take), through the DSP at DSD Processing's DSP rate and our own modulator; only for a player that takes native DSD itself (it lists dsf). PCM and DSD each have their own filters, shown with their options: one for a 44.1 or 48 kHz track, one for hi-res, the engine resampling in 64-bit floating point. Each is a filter, its length and its phase. Kaiser and Gaussian remove every image above the track's band; Half-band, Slow roll-off and Non-ringing let some through, for listening (going down in rate they run as Kaiser short). Phase: linear rings evenly before and after a transient; minimum has no ringing before it; intermediate is in between; Intermediate 80% and 70% sit nearer linear, the top of the band less delayed. Length: short rings for the least time; long keeps more of the top of the band flat.
 
 PLUGIN_SQUEEZEDSP_SRC_CONVERT_TO
 	EN	Convert to
@@ -181,9 +196,6 @@ PLUGIN_SQUEEZEDSP_SRC_FILTER_LONG
 
 PLUGIN_SQUEEZEDSP_SRC_FILTER_XLONG
 	EN	Extra-long
-
-PLUGIN_SQUEEZEDSP_LIVE_ENGINE_UP
-	EN	the engine
 
 PLUGIN_SQUEEZEDSP_PCM_PROC
 	EN	PCM Processing Settings

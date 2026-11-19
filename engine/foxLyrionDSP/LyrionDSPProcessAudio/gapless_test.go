@@ -11,7 +11,7 @@ import (
 	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder"
 	"github.com/Foxenfurter/foxAudioLib/foxFilters"
 	"github.com/Foxenfurter/foxAudioLib/foxLog"
-	"github.com/Foxenfurter/foxAudioLib/foxUpsampler"
+	"github.com/Foxenfurter/foxAudioLib/gipsyUpsampler"
 	"github.com/Foxenfurter/foxLyrionDSP/LyrionDSPSettings"
 )
 
@@ -233,7 +233,7 @@ func TestUpsampleStageHolds(t *testing.T) {
 	}{{"follows=1\nthis=44100:pcm:2\nnext=44100:pcm:2\n", false}, {"follows=0\n", true}, {"", true}} {
 		ap, _ := noteProc(t, v.note)
 		ap.gaplessStart()
-		u, err := foxUpsampler.New(44100, 352800, 2, foxUpsampler.DefaultCD, foxUpsampler.DefaultHiRes)
+		u, err := gipsyUpsampler.New(44100, 352800, 2, gipsyUpsampler.DefaultCD, gipsyUpsampler.DefaultHiRes)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -260,7 +260,7 @@ func TestSaveDSPResidualsHeld(t *testing.T) {
 		ap.Config.Bypass = v.bypass
 		ap.Delay = foxFilters.NewDelay(2, 352800)
 		ap.Encoder = &foxAudioEncoder.AudioEncoder{}
-		u, _ := foxUpsampler.New(44100, 352800, 2, foxUpsampler.DefaultCD, foxUpsampler.DefaultHiRes)
+		u, _ := gipsyUpsampler.New(44100, 352800, 2, gipsyUpsampler.DefaultCD, gipsyUpsampler.DefaultHiRes)
 		ap.Upsampler = u
 		if err := ap.SaveDSPResiduals(10, 1); err != nil {
 			t.Fatal(err)
