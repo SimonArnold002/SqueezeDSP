@@ -799,6 +799,26 @@ func (pc *PartitionedConvolver) DecodeState(data []byte) error {
 	return nil
 }
 
+// ScaleState (SqueezeDSP fork, 2026-11-20, a gain change at a gapless join): multiplies all the convolver holds of the
+// input so far (its spectra, the overlap tail, the input short of a partition: DecodeState's) by f. The engine's gain
+// comes after the convolver, so the next track's engine scales the last track's held input by the last track's gain
+// over its own, and the last track's decay plays at the last track's gain (Simon: "a playlist needs to carry track
+// gain"). All of it is linear in the input, so this is exact.
+func (pc *PartitionedConvolver) ScaleState(f float64) {
+	c := complex(f, 0)
+	for _, slot := range pc.audioFFTRing {
+		for i := range slot {
+			slot[i] *= c
+		}
+	}
+	for i := range pc.previousChunkTail {
+		pc.previousChunkTail[i] *= f
+	}
+	for i := range pc.Buffer {
+		pc.Buffer[i] *= f
+	}
+}
+
 // ─── State management ─────────────────────────────────────────────────────────
 
 func (pc *PartitionedConvolver) Reset() {

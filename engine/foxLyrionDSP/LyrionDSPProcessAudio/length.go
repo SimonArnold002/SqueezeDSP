@@ -38,7 +38,8 @@ import (
 type lengthState struct {
 	on       bool        // note mode: the gate runs
 	exact    bool        // the input's count is known at the start: the header states the stream's frames
-	prevIn   int64       // the continuous stream's input frames before this track (the decoder's rate)
+	prevIn   int64       // the continuous stream's input frames before this track since base (the decoder's rate)
+	base     int64       // the output frame where the run of tracks at this source rate began (0: the stream's start)
 	prevCut  int64       // the output frame this stream starts at (ProcRate)
 	pending  [][]float64 // the last stream's frames past its cut: this stream's first
 	statedIn int64       // this track's input frames, as known at the start
@@ -55,12 +56,24 @@ type lengthState struct {
 	keep             [][]float64
 }
 
-// lengthPos: the continuous stream's output frame at this many input frames
+// lengthPos: the continuous stream's output frame at this many input frames since base. Within a run of one source
+// rate the place comes from the run's whole input count (a rational ratio never drifts); a source-rate change at a
+// gapless join (2026-11-20, `A SOURCE-RATE CHANGE BREAKS THE CONTINUOUS COUNT`: the DSP rate stays, Fixed upsampling)
+// starts a new run where the last track's end, played out, finishes (gapless.go playOutLast), counting this track's
+// input from 0 at its own rate.
 func (ap *AudioProcessor) lengthPos(in int64) int64 {
 	if ap.ProcRate == ap.Decoder.SampleRate {
-		return in
+		return ap.length.base + in
 	}
-	return int64(math.Round(float64(in) * float64(ap.ProcRate) / float64(ap.Decoder.SampleRate)))
+	return ap.length.base + int64(math.Round(float64(in)*float64(ap.ProcRate)/float64(ap.Decoder.SampleRate)))
+}
+
+// runEnd: the output frame where the input of the residual's run ended (its run's base plus its input at its rate)
+func runEnd(res *DSPResidualsCache, procRate int) int64 {
+	if res.InRate <= 0 || res.InRate == procRate {
+		return res.GateBase + res.GateIn
+	}
+	return res.GateBase + int64(math.Round(float64(res.GateIn)*float64(procRate)/float64(res.InRate)))
 }
 
 // lengthStart (Initialize, after gaplessTail, before the encoder is made): this stream's place, and its count.
@@ -77,7 +90,16 @@ func (ap *AudioProcessor) lengthStart() {
 		ap.endHold() // decided now, from the note as it is at the start
 	}
 	if res := ap.gapless.res; ap.gapless.carry && res != nil && res.Gate {
-		g.prevIn, g.prevCut = res.GateIn, res.GateCut
+		g.prevCut = res.GateCut
+		if !ap.gapless.playOut {
+			g.base, g.prevIn = res.GateBase, res.GateIn // the run goes on (as before 2026-11-20)
+		} else {
+			// this stream plays the last track's end out first (gapless.go playOutLast): this track's input is counted
+			// from 0, at its own rate, from where that played-out end finishes
+			g.base = runEnd(res, ap.ProcRate) + res.GateTail
+			ap.Logger.Info(fmt.Sprintf("%s: stream length: this track's input is counted from frame %d of the continuous stream, where the last track's end played out finishes",
+				packageName, g.base))
+		}
 		if len(res.Pending) == ap.Decoder.NumChannels {
 			g.pending = res.Pending
 		}

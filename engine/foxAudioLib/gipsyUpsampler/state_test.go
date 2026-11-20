@@ -114,6 +114,58 @@ func TestStateEachTrackAloneBreaksTheJoin(t *testing.T) {
 }
 
 // TestStateRefusesAnotherChain: a state goes only to a chain made the same way.
+// TestFromState (2026-11-20, a source-rate change: the next track's engine plays this chain out): the chain rebuilt from
+// its state alone goes on to the bit as the chain itself would (the rest of a stream, then silence, then Flush), for a
+// CD-rate and a hi-res source with the player's two filters different (New picks one), and going down with a leaky
+// filter (New's Kaiser in its place); a broken state is refused.
+func TestFromState(t *testing.T) {
+	cd, hi := Choice{Phase: Intermediate}, Choice{Length: ExtraLong, Phase: Linear}
+	for _, v := range []struct {
+		in, out   int
+		cd, hiRes Choice
+	}{{48000, 96000, cd, hi}, {44100, 384000, Choice{Phase: Int80}, hi}, {96000, 384000, cd, hi}, {44100, 705600, Choice{Length: Long, Phase: Linear}, hi},
+		{192000, 96000, cd, Choice{Family: HalfBand, Phase: Intermediate}}, {44100, 96000, Choice{Length: Long, Phase: Minimum}, hi}} {
+		rng := rand.New(rand.NewSource(int64(v.in + v.out)))
+		n := v.in/3 + 555
+		x := [][]float64{make([]float64, n), make([]float64, n)}
+		for i := 0; i < n; i++ {
+			x[0][i], x[1][i] = rng.Float64()*2-1, rng.Float64()*2-1
+		}
+		u, err := New(v.in, v.out, 2, v.cd, v.hiRes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		feed(u, x, 4096, false)
+		s, err := u.State()
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := FromState(s)
+		if err != nil {
+			t.Fatalf("%d to %d: %v", v.in, v.out, err)
+		}
+		if w.InRate != u.InRate || w.OutRate != u.OutRate || w.Choice != u.Choice || w.TapsA != u.TapsA || w.TapsB != u.TapsB {
+			t.Fatalf("%d to %d: rebuilt %d to %d %s %d/%d, the chain %d to %d %s %d/%d", v.in, v.out, w.InRate, w.OutRate, w.Choice,
+				w.TapsA, w.TapsB, u.InRate, u.OutRate, u.Choice, u.TapsA, u.TapsB)
+		}
+		rest := [][]float64{append(append([]float64(nil), x[0][:n/2]...), make([]float64, 3000)...), append(append([]float64(nil), x[1][:n/2]...), make([]float64, 3000)...)}
+		a, b := feed(u, rest, 1777, true), feed(w, rest, 4096, true)
+		for ch := range a {
+			if len(a[ch]) != len(b[ch]) || len(a[ch]) == 0 {
+				t.Fatalf("%d to %d: channel %d %d frames, rebuilt %d", v.in, v.out, ch, len(a[ch]), len(b[ch]))
+			}
+			for k := range a[ch] {
+				if a[ch][k] != b[ch][k] {
+					t.Fatalf("%d to %d %s: channel %d frame %d: %v, rebuilt %v", v.in, v.out, u.Choice, ch, k, a[ch][k], b[ch][k])
+				}
+			}
+		}
+	}
+	if _, err := FromState([]byte("not gob")); err == nil {
+		t.Error("a broken state was taken")
+	}
+}
+
 func TestStateRefusesAnotherChain(t *testing.T) {
 	c := Choice{Phase: Intermediate}
 	u, _ := New(44100, 352800, 2, c, c)

@@ -38,6 +38,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/Foxenfurter/foxAudioLib/foxAudioDecoder/gipsyDSDReader"
+	"github.com/Foxenfurter/foxAudioLib/foxAudioEncoder/gipsyDSDEncoder"
+	"github.com/Foxenfurter/foxAudioLib/gipsyUpsampler"
 )
 
 // gaplessNote is the plugin's note for a player.
@@ -119,6 +123,14 @@ type gaplessState struct {
 	tailOut int64 // frames at ProcRate the stages' tails come to at most (the silence the end plays them out with),
 	// and what the last track's held state brings into this one's start at most
 	tailFrame int64 // the same at the decoder's rate, the silence tailStage sends
+	// a source-rate change (2026-11-20, playOutLast): this stream plays the last track's held end out first, then starts
+	// this track afresh; lead is that end before the DSP (at ProcRate), the upsample stage's first frames
+	playOut bool
+	lead    [][]float64
+	// (joingain.go, 2026-11-20) the last track's channel gains, and which stages took its input: the convolvers and the
+	// delay (LoadDSPResiduals), the upsampler, the DSD decode
+	gains                      []float64
+	dspTaken, upTaken, rdTaken bool
 }
 
 // noteMode: the plugin's note governs this stream
@@ -176,12 +188,28 @@ func (ap *AudioProcessor) gaplessStart() {
 	// next did not take, its stream not ours) goes to no one
 	g.carry = g.note.continues && g.res != nil && g.res.Held && (g.note.prev == "" || g.note.prev == g.res.TrackURL) &&
 		(!ap.Args.Tail || g.res.Gate)
+	if g.carry {
+		g.gains = g.res.Gains
+	}
 	ap.Logger.Info(fmt.Sprintf("%s: gapless note: continues %v, the last track %s", packageName, g.note.continues,
 		map[bool]string{true: "held its state for this one: taken", false: "left nothing for this one (or this one starts afresh)"}[g.carry]))
-	if g.carry && ap.Upsampler != nil && g.res.Upsampler != nil {
+	// a source-rate (or kind) change (2026-11-20): this track cannot go on from the last one's front stage (its upsampler
+	// or DSD decode runs at the last track's rate), and mixed rates are not gapless (Simon); so the last track's end is
+	// played out first, as if nothing had followed it, and this track starts afresh (playOutLast). Its DSP stages after
+	// the front (the FIR, delay, crossfeed, DSF out) are at the same DSP rate and go on, so the last track's own decay
+	// plays out through them.
+	kind := "pcm"
+	if ap.Decoder.DSDReader != nil {
+		kind = "dsd"
+	}
+	change := g.carry && g.res.Gate && (g.res.InRate != ap.Decoder.SampleRate || (g.res.InKind != "" && g.res.InKind != kind))
+	upLost, rdLost := false, false
+	if g.carry && !change && ap.Upsampler != nil && g.res.Upsampler != nil {
 		if err := ap.Upsampler.SetState(g.res.Upsampler); err != nil {
 			ap.Logger.Warn(packageName + ": the upsampler starts afresh: " + err.Error())
+			upLost = true
 		} else {
+			g.upTaken = true
 			ap.Logger.Info(packageName + ": the upsampler goes on from the last track")
 		}
 	}
@@ -189,15 +217,124 @@ func (ap *AudioProcessor) gaplessStart() {
 	// frames it sends are then numbered over the stream, so the length the header states comes from it again
 	if rd := ap.Decoder.DSDReader; rd != nil {
 		rd.EndHold = ap.endHold
-		if g.carry && g.res.Reader != nil {
+		if g.carry && !change && g.res.Reader != nil {
 			if err := rd.SetState(g.res.Reader); err != nil {
 				ap.Logger.Info(packageName + ": the DSD decode starts afresh: " + err.Error())
+				rdLost = true
 			} else {
+				g.rdTaken = true
 				ap.Decoder.Size = rd.Size()
 				ap.Logger.Info(packageName + ": the DSD decode goes on from the last file")
 			}
 		}
 	}
+	if g.carry && g.res.Gate && (change || upLost || rdLost) {
+		ap.playOutLast(change)
+	}
+}
+
+// playOutLast: the last track's held end played out at this stream's head, as a stream of it that nothing followed would
+// have ended: what its front stage (upsampler or DSD decode, rebuilt from the residual at the last track's rate) still
+// held, then silence, to the frame where that stream would have stopped (the last track's place + its tail). The frames
+// go in before the DSP (the upsample stage's first), whose stages go on from the last track's, so its FIR, delay and
+// crossfeed decay play out too; this track then starts afresh after them, its input counted from there (lengthStart).
+// If the front stage cannot be rebuilt, silence in its place (logged): the count stays right.
+func (ap *AudioProcessor) playOutLast(change bool) {
+	g, res := &ap.gapless, ap.gapless.res
+	g.playOut = true
+	ch := ap.Decoder.NumChannels
+	from := res.GateCut + int64(pendingLen(res.Pending)) // the frame the stages' next output is
+	n := runEnd(res, ap.ProcRate) + res.GateTail - from
+	if n < 0 {
+		ap.Logger.Warn(fmt.Sprintf("%s: the last track's end played out: %d frames before its own end already sent: none played", packageName, -n))
+		n = 0
+	}
+	var front [][]float64
+	what := "no front stage held anything"
+	switch {
+	case res.Upsampler != nil:
+		if u, err := gipsyUpsampler.FromState(res.Upsampler); err != nil {
+			ap.Logger.Warn(packageName + ": the last track's upsampler cannot be rebuilt (silence in its place): " + err.Error())
+			what = "silence in place of its upsampler"
+		} else {
+			// the silence a stream of it that nothing followed would have sent after its input (tailStage)
+			zeros := int64(math.Ceil(float64(res.GateTail)*float64(u.InRate)/float64(ap.ProcRate))) + 1
+			for zeros > 0 {
+				k := min(zeros, 4096)
+				z := make([][]float64, ch)
+				for c := range z {
+					z[c] = make([]float64, k)
+				}
+				front = appendFrames(front, u.Process(z), ch)
+				zeros -= k
+			}
+			front = appendFrames(front, u.Flush(), ch)
+			what = fmt.Sprintf("its upsampler (%d to %d Hz, %s) rebuilt", u.InRate, u.OutRate, u.Choice)
+		}
+	case res.Reader != nil:
+		empty := filepath.Join(ap.AppSettings.TempDataFolder, "playout_input_"+ap.Args.CleanClientID+".dsf")
+		e := &gipsyDSDEncoder.Encoder{DSDRate: res.InDSDRate, InRate: res.InDSDRate, NumChannels: res.NumChannels, HeldCount: true}
+		data, err := []byte(nil), e.Open()
+		if err == nil {
+			data, err = e.EncodeHeader()
+		}
+		if err == nil {
+			err = os.WriteFile(empty, data, 0644)
+		}
+		if err == nil {
+			// the gain the last track's decode ran at: the player's DSDGain unless the command line set it, none for DSF
+			// out (as Initialize sets it for a DSD input)
+			gain := ap.Args.DSDGain
+			if gg := ap.Config.DSDGain; gg != nil && !ap.Args.DSDGainSet {
+				gain = *gg
+			}
+			if strings.ToUpper(ap.Args.OutputFormat) == "DSF" && !ap.Args.DSDGainSet {
+				gain = 0
+			}
+			front, err = gipsyDSDReader.PlayOut(res.Reader, empty, gain, ap.Decoder.TargetFrameSize, ap.Decoder.DebugFunc)
+			os.Remove(empty)
+		}
+		if err != nil {
+			ap.Logger.Warn(packageName + ": the last track's DSD decode cannot be played out (silence in its place): " + err.Error())
+			front, what = nil, "silence in place of its DSD decode"
+		} else {
+			what = fmt.Sprintf("its DSD decode (DSD %d) rebuilt", res.InDSDRate)
+		}
+	}
+	got := 0
+	if len(front) == ch {
+		got = len(front[0])
+	}
+	g.lead = make([][]float64, ch)
+	for c := range g.lead {
+		g.lead[c] = make([]float64, n)
+		if got > 0 {
+			copy(g.lead[c], front[c])
+		}
+	}
+	ap.Logger.Info(fmt.Sprintf("%s: %s: the last track's end played out first (%d frames: %s, %d of them its last frames and their ringing, then silence for its filters' decay), then this track afresh",
+		packageName, map[bool]string{true: fmt.Sprintf("the source changed (%s %d Hz to %s %d Hz)", res.InKind, res.InRate, kindOf(ap), ap.Decoder.SampleRate),
+			false: "the last track's front stage cannot go on"}[change], n, what, min(int64(got), n)))
+}
+
+func kindOf(ap *AudioProcessor) string {
+	if ap.Decoder.DSDReader != nil {
+		return "dsd"
+	}
+	return "pcm"
+}
+
+// appendFrames: blk's channels after acc's
+func appendFrames(acc, blk [][]float64, ch int) [][]float64 {
+	if acc == nil {
+		acc = make([][]float64, ch)
+	}
+	if len(blk) == ch {
+		for c := range acc {
+			acc[c] = append(acc[c], blk[c]...)
+		}
+	}
+	return acc
 }
 
 // gaplessTail (Initialize, once the filters are known): the most the stages' tails come to, the silence a stream that

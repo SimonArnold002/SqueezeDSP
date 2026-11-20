@@ -50,6 +50,41 @@ func (u *Upsampler) State() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// Scale (2026-11-20, a gain change at a gapless join): multiplies what each stage holds of channel ch's input so far by
+// f[ch] (SetState's, the last track's): the engine's gain comes after the chain, so the next track's engine scales the
+// last track's held input by the last track's gain over its own. Linear, so exact. A missing or 1 factor leaves the
+// channel as it is.
+func (u *Upsampler) Scale(f []float64) {
+	for _, st := range u.stages {
+		for ch, p := range st {
+			if ch >= len(f) || f[ch] == 1 {
+				continue
+			}
+			for i := range p.buf {
+				p.buf[i] *= f[ch]
+			}
+		}
+	}
+}
+
+// FromState (2026-11-20, a source-rate change at a gapless join): the chain that wrote the state, designed again from
+// what the state records (its rates, channels and the filter it ran, the one New chose), and put where it left off, so
+// the next track's engine, whose own chain cannot go on from it, can play its last outputs out.
+func FromState(data []byte) (*Upsampler, error) {
+	var s chainState
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&s); err != nil {
+		return nil, fmt.Errorf("upsample state: %w", err)
+	}
+	u, err := New(s.InRate, s.OutRate, s.Channels, s.Choice, s.Choice)
+	if err != nil {
+		return nil, err
+	}
+	if err := u.SetState(data); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
 // SetState puts a chain made the same way where State left the last one; on any error the chain is as New made it.
 func (u *Upsampler) SetState(data []byte) error {
 	var s chainState

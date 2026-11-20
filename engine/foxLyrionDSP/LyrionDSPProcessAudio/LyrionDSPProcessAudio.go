@@ -84,7 +84,7 @@ type AudioProcessor struct {
 	flacSeek chan flacSeekResult
 }
 
-const CACHE_VERSION = 9 // 9: the input's kind, rate and DSD rate, for --tail (tail.go); 8: the stream's place and the frames past its cut, length.go; Increment when changing convolver type (6, SqueezeDSP fork: the convolver's state carries the
+const CACHE_VERSION = 10 // 10: GateBase, the output frame the run of one source rate began at, and GateTail, what a played-out end runs past its point (length.go, gapless.go: a source-rate change); 9: the input's kind, rate and DSD rate, for --tail (tail.go); 8: the stream's place and the frames past its cut, length.go; Increment when changing convolver type (6, SqueezeDSP fork: the convolver's state carries the
 // input a track ended with short of a partition, for an exact gapless join; 7: whether the track held its state for
 // the next, and the upsampler's, gapless.go)
 type DSPResidualsCache struct {
@@ -106,8 +106,11 @@ type DSPResidualsCache struct {
 	TrackURL  string // the track that wrote it (--trackURL): only the stream that continues that track takes it
 	// (length.go) the continuous stream's place where this track's stream was cut, and the frames the stages sent past
 	// the cut, the next stream's first; EncBits: the DSD samples a channel DSF out held (they count in the next header)
-	Gate            bool
-	GateIn, GateCut int64
+	// GateIn counts the input frames since GateBase, the output frame where the run of tracks at this source rate began;
+	// GateTail, the frames a stream of this track that nothing followed would have run past its point (its stages'
+	// tails): a next track at another source rate plays this one's end out first (gapless.go playOutLast)
+	Gate                                bool
+	GateIn, GateCut, GateBase, GateTail int64
 	Pending         [][]float64
 	EncBits         int64
 	// (tail.go) the held track's input, so --tail can open an empty one of the same kind: "pcm" or "dsd", the rate the
@@ -115,6 +118,9 @@ type DSPResidualsCache struct {
 	InKind    string
 	InRate    int
 	InDSDRate int
+	// (joingain.go, 2026-11-20) the track's channel gains, the units what it held is in: a next track at another gain
+	// scales what it takes by these over its own, so this track's held end plays at this track's gain
+	Gains []float64
 }
 
 // PreviousTrackCache persists only the track identity and gain resolved at the
@@ -797,6 +803,8 @@ func (ap *AudioProcessor) Initialize() error {
 	}
 	// Now get replaygain and compute channel gains, which may be needed for convolution depending on configuration
 	ap.PrepareChannelGains()
+	// what this stream took of the last track's input plays at the last track's gain (joingain.go)
+	ap.joinGain()
 	// the most the stages' tails come to, which a stream that nothing follows ends with (gapless.go)
 	ap.gaplessTail()
 	// the stream's place in the continuous stream, and its count if the input's is known (length.go)
@@ -1354,8 +1362,11 @@ func reportSpeedTo(path string, speed func() (speedFigures, bool), stages func()
 // upsampleStage: with an upsampler, a stage between the decoder and the rest that takes each block up to ProcRate
 // and, when the decoder is done, the filters' last output (Flush), unless a track follows that goes on from its state
 // (note mode, gapless.go: then its last outputs come out at that track's start); without one, the decoder's own channel.
+// (2026-11-20) After a source-rate change it first sends the last track's end played out (gapless.go playOutLast), with
+// or without an upsampler of its own.
 func (ap *AudioProcessor) upsampleStage(in chan [][]float64, buffer int, wg *sync.WaitGroup) chan [][]float64 {
-	if ap.Upsampler == nil {
+	lead := ap.gapless.lead
+	if ap.Upsampler == nil && lead == nil {
 		return in
 	}
 	out := make(chan [][]float64, buffer)
@@ -1365,6 +1376,20 @@ func (ap *AudioProcessor) upsampleStage(in chan [][]float64, buffer int, wg *syn
 			close(out)
 			wg.Done()
 		}()
+		for len(lead) > 0 && len(lead[0]) > 0 {
+			k := min(len(lead[0]), 8192)
+			blk := make([][]float64, len(lead))
+			for c := range lead {
+				blk[c], lead[c] = lead[c][:k:k], lead[c][k:]
+			}
+			out <- blk
+		}
+		if ap.Upsampler == nil {
+			for blk := range in {
+				out <- blk
+			}
+			return
+		}
 		for blk := range in {
 			t0 := time.Now()
 			if up := ap.Upsampler.Process(blk); len(up) > 0 && len(up[0]) > 0 {
@@ -1767,6 +1792,7 @@ func (ap *AudioProcessor) SaveDSPResiduals(Duration float64, processingTime floa
 		}
 		if ap.endHold() {
 			cache.Held = true
+			cache.Gains = append([]float64(nil), ap.ChannelGains...)
 			cache.ConvolverStates = make([][]byte, len(ap.Convolvers))
 			for i, conv := range ap.Convolvers {
 				state, err := conv.EncodeState()
@@ -1795,7 +1821,7 @@ func (ap *AudioProcessor) SaveDSPResiduals(Duration float64, processingTime floa
 				cache.EncBits = d.HeldBits()
 			}
 			if g := &ap.length; g.on && g.held {
-				cache.Gate, cache.GateIn, cache.GateCut, cache.Pending = true, g.cumIn, g.cut, g.keep
+				cache.Gate, cache.GateIn, cache.GateCut, cache.GateBase, cache.GateTail, cache.Pending = true, g.cumIn, g.cut, g.base, g.tail, g.keep
 			}
 			cache.InKind, cache.InRate = "pcm", ap.Decoder.SampleRate
 			if rd := ap.Decoder.DSDReader; rd != nil {
@@ -1837,6 +1863,7 @@ func (ap *AudioProcessor) SaveDSPResiduals(Duration float64, processingTime floa
 		PreviousAlbumGain: ap.PreviousAlbumGain,
 		PreviousAlbumID:   ap.PreviousAlbumID, // *** NEW ***
 		CrossfeedState:    ap.Crossfeed.SaveState(),
+		Gains:             append([]float64(nil), ap.ChannelGains...), // (joingain.go)
 	}
 
 	return ap.saveCacheToFile(cache)
@@ -1898,6 +1925,7 @@ func (ap *AudioProcessor) LoadDSPResiduals() error {
 			return fmt.Errorf("cache version mismatch: got %d, want %d",
 				cache.Version, CACHE_VERSION)
 		}
+		ap.gapless.gains = cache.Gains // (joingain.go) note mode: gaplessStart's
 	}
 
 	ap.Delay = cache.DelayBuffers
@@ -1914,6 +1942,7 @@ func (ap *AudioProcessor) LoadDSPResiduals() error {
 			}
 		}
 	}
+	ap.gapless.dspTaken = true // (joingain.go) the convolvers and the delay hold the last track's input
 
 	ap.Logger.Debug(errorText + "DSP Residuals loaded successfully")
 	return nil

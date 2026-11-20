@@ -689,6 +689,10 @@ type stage1 struct {
 	k     int
 	every int
 	cnt   int
+	// (2026-11-20, a gain change at a gapless join; ScaleHeld) old: the first bytes of buf that are the last file's, f:
+	// what their part of an output's sum is multiplied by; 0 old, nothing
+	old int
+	f   float64
 }
 
 // newStage1: every 0 (native) is no filter: run hands back each bit as +-1, the oldest first
@@ -723,6 +727,9 @@ func (s *stage1) run(in []byte, out []float64) []float64 {
 	k := s.k
 	s.buf = append(s.buf[:k-1], in...)
 	tab := s.tab
+	if s.old > 0 {
+		return s.runOld(in, out)
+	}
 	for i := range in {
 		if s.cnt++; s.cnt < s.every {
 			continue
@@ -744,6 +751,33 @@ func (s *stage1) run(in []byte, out []float64) []float64 {
 		}
 		out = append(out, (a0+a1)+(a2+a3))
 	}
+	copy(s.buf, s.buf[len(s.buf)-(k-1):])
+	s.buf = s.buf[:k-1]
+	return out
+}
+
+// runOld: run while the window still reaches the last file's bytes (s.old of them at buf's start, buf already holding
+// in): an output's sum is split there, the last file's part times s.f, so each file's bits come out at its own gain
+// (the engine's gain comes after the decode; ScaleHeld). Bytes cannot be scaled, so this is the one exact way.
+func (s *stage1) runOld(in []byte, out []float64) []float64 {
+	k, tab := s.k, s.tab
+	for i := range in {
+		if s.cnt++; s.cnt < s.every {
+			continue
+		}
+		s.cnt = 0
+		w := s.buf[i : i+k]
+		o := min(max(s.old-i, 0), k) // window positions before o are the last file's
+		var a, b float64
+		for j := 0; j < o; j++ {
+			a += tab[j][w[j]]
+		}
+		for j := o; j < k; j++ {
+			b += tab[j][w[j]]
+		}
+		out = append(out, s.f*a+b)
+	}
+	s.old = max(s.old-len(in), 0)
 	copy(s.buf, s.buf[len(s.buf)-(k-1):])
 	s.buf = s.buf[:k-1]
 	return out

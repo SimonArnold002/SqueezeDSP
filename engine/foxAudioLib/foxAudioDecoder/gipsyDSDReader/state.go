@@ -105,6 +105,52 @@ func (r *Reader) State() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// PlayOut (2026-11-20, a source-rate change at a gapless join; the processor's gapless.go): the decode that wrote the state
+// played out on its own, for a next track that cannot go on from it (PCM, or DSD at another rate). The decode is made
+// again from what the state records (its DSD rate, the rate out, channels, cutoff, native and integrator) on empty, an
+// empty DSF of its DSD rate (as --tail's input), put where it left off, and run with nothing following: the frames it
+// held, then its filters' reach played out with DSD silence, exactly what that decode would have sent had nothing
+// followed it. gainDB is the gain the decode ran at (the state does not record it).
+func PlayOut(data []byte, empty string, gainDB float64, frameSize int, debug func(string)) ([][]float64, error) {
+	var st readerState
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&st); err != nil {
+		return nil, fmt.Errorf("%s state: %w", packageName, err)
+	}
+	r := &Reader{Filename: empty, OutRate: st.OutRate, Cutoff: st.Cutoff, GainDB: gainDB, Native: st.Native,
+		Integrator: st.Integrator, TargetFrameSize: frameSize, DebugFunc: debug}
+	if err := r.Open(); err != nil {
+		r.Close()
+		return nil, err
+	}
+	defer r.Close()
+	if r.DSDRate != st.DSDRate {
+		return nil, fmt.Errorf("%s: the empty input is DSD %d, the state's %d", packageName, r.DSDRate, st.DSDRate)
+	}
+	if err := r.SetState(data); err != nil {
+		return nil, err
+	}
+	r.EndHold = func() bool { return false }
+	out := make(chan [][]float64, 4)
+	done := make(chan error, 1)
+	go func() { // DecodeInput leaves the channel open (its caller closes it)
+		err := r.DecodeInput(out)
+		close(out)
+		done <- err
+	}()
+	res := make([][]float64, r.NumChannels)
+	for blk := range out {
+		for c := range res {
+			if c < len(blk) {
+				res[c] = append(res[c], blk[c]...)
+			}
+		}
+	}
+	if err := <-done; err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // SetState, after Open: the decode goes on where State left the last file's, this file's first byte after its last;
 // frames are numbered over the stream, so Frames is what this file sends. On any error the decode is as Open left it.
 func (r *Reader) SetState(data []byte) error {
@@ -161,4 +207,44 @@ func (r *Reader) SetState(data []byte) error {
 	r.Frames = r.kEnd - r.kStart
 	r.resume = s
 	return nil
+}
+
+// ScaleHeld (2026-11-20, a gain change at a gapless join): what the decode took from the last file (SetState) plays at
+// f[c] times, channel by channel: the last track's gain over this one's, since the engine's gain comes after the decode
+// (Simon: "a playlist needs to carry track gain"). Stages 2 and 3 hold samples, scaled where they are (stage 2 packs a
+// pair of channels as one complex signal, the first real); stage 1 holds the last file's bytes, which cannot be scaled,
+// so the outputs whose window reaches back over them split their sum there (stage1.runOld). Linear, so exact. A missing
+// or 1 factor leaves the channel as it is; no state taken, nothing.
+func (r *Reader) ScaleHeld(f []float64) {
+	s := r.resume
+	if s == nil {
+		return
+	}
+	fc := func(c int) float64 {
+		if c < len(f) {
+			return f[c]
+		}
+		return 1
+	}
+	for c, a := range s.s1 {
+		if a != nil && a.every > 0 && fc(c) != 1 {
+			a.old, a.f = len(a.buf), fc(c)
+		}
+	}
+	for p, b := range s.s2 {
+		fl, fr := fc(2*p), fc(2*p+1)
+		if b == nil || (fl == 1 && fr == 1) {
+			continue
+		}
+		for i, v := range b.x {
+			b.x[i] = complex(real(v)*fl, imag(v)*fr)
+		}
+	}
+	for c, h := range s.hist {
+		if g := fc(c); g != 1 {
+			for i := range h {
+				h[i] *= g
+			}
+		}
+	}
 }

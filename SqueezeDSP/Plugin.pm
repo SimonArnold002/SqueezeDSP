@@ -13,6 +13,9 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.56	Fork: gapless tracks at different source rates play right: the last track plays out in full, then
+				the next starts (a rate change stuck the queue). At a gapless join each track keeps its own ReplayGain
+				(the last one's filter decay played at the next one's gain).
 	0.1.72.55	Fork: the new page's help shows when the pointer rests on a label or button (the page draws it, as
 				the classic page does; the browser's own tooltip did not show inside Material). The engine's own
 				parts are named gipsy..., not fox... (nothing it does changes).
@@ -300,7 +303,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.55";
+my $revision = "0.1.72.56";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;

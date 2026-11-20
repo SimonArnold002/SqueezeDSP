@@ -165,6 +165,27 @@ named in `UPSTREAM`, plus the changes below. Only source is copied (`*.go`, `go.
   `TestMaxGainStrengthBlend` (the ledger's 30 kHz tone: -6.02 dB, Fox's measure -1.14), `TestFilterCacheVersion`; the
   end to end `t/engine_gain.py` (ReplayGain off at 352.8k, 384k and 705.6k: -0.001 dB, where the earlier engine read
   -0.34 to -0.39).
+- **A source-rate change at a gapless join** (2026-11-20; `LyrionDSPProcessAudio` `gapless.go` `playOutLast`,
+  `length.go` `runEnd`, `CACHE_VERSION` 10; `gipsyUpsampler` `FromState`; `gipsyDSDReader` `PlayOut`). A track that
+  held for a next one whose rate was not known yet (the plugin's note `next=0::0`), followed by one at another source
+  rate (or kind) at the same DSP rate, broke the continuous count: the next stream started from the wrong place, the
+  length a renderer was told was short, and on the A8 the queue stuck. Mixed rates are not gapless (Simon), so the next
+  engine now plays the last track's held end out first, as if nothing had followed it (its upsampler, or its DSD
+  decode, designed again from the state and fed silence), then starts its own track afresh, its count from where that
+  end finishes. Joined = each track played alone, end to end, under both contracts, with the FIR and DSD
+  (`t/engine_gapless.py` and `t/engine_length.py`, MIXED); the A8's routes byte for byte 0.1.72.55's
+  (`t/length/regress_exact.py`).
+- **A gain change at a gapless join** (2026-11-20; `LyrionDSPProcessAudio` `joingain.go`, the residual's `Gains`;
+  `foxConvolverPartition` `ScaleState`; `gipsyUpsampler` `Scale`; `gipsyDSDReader` `ScaleHeld`, `stage1.runOld`). The
+  engine's gain (ReplayGain, the filter's headroom, the balance) comes after the stages that carry the last track's
+  input across a join (Fox's convolver state and delay buffer; our upsampler, DSD decode and played-out end), so since
+  Fox's engine the last track's decay came out at the next track's gain wherever the gain changed (a playlist with track
+  gain, album to album). The next engine now scales what it took by the last track's gains over its own; every stage is
+  linear, so each track plays at its own gain exactly. The DSD decode's first stage holds raw bits, which cannot be
+  scaled: its outputs over the last file's bytes split their sum there. Equal gains (an album) scale nothing: byte for
+  byte as before. Tests: `TestGaplessJoinGain`, `TestScaleJoinAtEachTracksGain`, `TestScaleHeldJoinAtEachFilesGain`,
+  `TestJoinFactors`, and end to end `t/engine_joingain.py` (each track's share separated by inverting its polarity:
+  within the 24-bit step on every route; 1.3 to 3.6 million LSB off on the engine before it).
 
 Until 0.1.72.37, without the switches, and with ReplayGain off or a FIR at its own rate, the engine's DSP output was
 byte-identical to Fox's shipped 0_2_40 (bench, raw 16/44.1 and 24/96 input with a preamp, four filters and
