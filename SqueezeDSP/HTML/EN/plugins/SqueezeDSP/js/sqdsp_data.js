@@ -18,7 +18,7 @@ function InitialiseData()
     {
     return {
         Bypass: 1,
-        ExactLength: 0,         // "Exact track length": 1 for a player that needs a stream's true length first (Gapless.pm)
+        ExactLength: 1,         // "Exact track length": 1 for a player that needs a stream's true length first (Gapless.pm); on by default since 0.1.72.57 (Simon 2026-11-20)
         OutputFormat: "FLAC",   // or "PCM": 24-bit WAV with its header, for a player that reads one
         Upsample: "off",        // the Sample Rate Converter: "on" (PCM: the engine resamples before the DSP; Upsample.pm), or "dsd"
         UpsamplePCMFilterCD: "short-int",    // PCM's filter for a source at 48 kHz and under: one of Upsample.pm's @FILTERS
@@ -451,7 +451,9 @@ function SqueezeDSPFetchCurrentSettings(callback) {
                 // the Sample Rate Converter to DSD: DSD out as above, and the stream-start hook (an older server: none)
                 upDsdOk: Number(data.result.up_dsd_ok) === 1,
                 // LMS's "Prefer native format", which SqueezeDSP needs off (an older server: none)
-                preferNative: Number(data.result.prefer_native) === 1
+                preferNative: Number(data.result.prefer_native) === 1,
+                // the engine's debug log, every player's (squeezedsp.debuglog; an older server: none)
+                debugLog: Number(data.result.debug_log) === 1
             };
 
             try {

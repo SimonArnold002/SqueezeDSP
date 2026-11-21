@@ -15,8 +15,13 @@
 
    SAVING: squeezedsp.saveall writes the player's WHOLE settings file, so the page keeps the whole
    file it read (unknown fields included) and changes only the fields it shows. Switches and
-   choices save at once; the three sliders wait for Apply, because every save re-opens the
-   playing stream (UI_Functions::saveallCommand seeks 0.5 s on) and a slider moves many times. */
+   choices save at once; sliders, number boxes, the equaliser's bands, Reset and a filter file's
+   import wait for Apply (PENDING, by settings path), because every save re-opens the playing
+   stream (UI_Functions::saveallCommand seeks 0.5 s on) and a slider moves many times.
+
+   PARITY (0.1.72.57, Simon 2026-11-20: "We need to ensure interface parity"): every setting the
+   classic page has is here, with its help on hover. The user picks one interface (the plugin's pref
+   interface): the Classic interface button switches to the classic page for good. */
 (function () {
     'use strict';
 
@@ -36,8 +41,33 @@
     }
     // an element's help on hover (none when empty): shown by the page's own box (tipStart), never the browser's title
     function tip(el, text) {
-        if (text) { el.dataset.tip = text; } else { delete el.dataset.tip; }
+        // a line break in a classic help text (PRESET_HELP's <BR>) is a line break here, never shown as markup
+        if (text) { el.dataset.tip = String(text).replace(/<br\s*\/?>/gi, '\n'); } else { delete el.dataset.tip; }
     }
+    function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+    function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+    function truthy(v) { return /^(1|on|true)$/i.test(String(v)); }
+    // a setting by its path in the player's settings ('Preamp', 'Delay.delay', 'ReplayGain.mode')
+    function getPath(o, path) {
+        var parts = String(path).split('.');
+        for (var i = 0; i < parts.length; i++) {
+            if (o === null || o === undefined || typeof o !== 'object') { return undefined; }
+            o = o[parts[i]];
+        }
+        return o;
+    }
+    function setPath(o, path, v) {
+        var parts = String(path).split('.');
+        for (var i = 0; i < parts.length - 1; i++) {
+            if (o[parts[i]] === null || typeof o[parts[i]] !== 'object' || Array.isArray(o[parts[i]])) { o[parts[i]] = {}; }
+            o = o[parts[i]];
+        }
+        o[parts[parts.length - 1]] = v;
+    }
+    // a file's name from its path, either separator
+    function baseName(p) { return String(p).split(/[\\/]/).pop(); }
+    // a label the classic page writes with a colon after it ("PEQ Bands:", "Load FIR File:")
+    function noColon(s) { return String(s == null ? '' : s).replace(/\s*:\s*$/, ''); }
     function rate(hz) {
         hz = num(hz, 0);
         if (!hz) { return ''; }
@@ -72,7 +102,7 @@
     // InitialiseData), so a player first set up here gets the same file. Keep them in step.
     function defaults() {
         return {
-            Bypass: 1, ExactLength: 0, OutputFormat: 'FLAC', Upsample: 'off', DSDCutoff: 30000, DSDGain: 0,
+            Bypass: 1, ExactLength: 1, OutputFormat: 'FLAC', Upsample: 'off', DSDCutoff: 30000, DSDGain: 0,
             UpsampleDSDRate: 2822400, UpsampleFilterCD: 'short-int', UpsampleFilterHiRes: 'short-lin', DSDOut: 0, DSDOutMod: 'standard',
             DSDOutDSP: 352800, DSDIntegrator: 'lin', UpsamplePCMFilterCD: 'short-int', UpsamplePCMFilterHiRes: 'short-lin',
             UpsampleTarget: 'family', UpsampleMax: 0, Preamp: 0, Balance: 0, Width: 0,
@@ -104,7 +134,10 @@
     var DATA = null;        // its whole settings file, over the defaults
     var STATUS = null;      // squeezedsp.status
     var PRESETS = [];       // [{ path, name }]
-    var PENDING = {};       // slider values not applied yet
+    var PENDING = {};       // changes waiting for Apply, by settings path ('Preamp', 'Delay.delay', 'Filters')
+    var FIRS = [];          // the impulse files on the server [{ path, file }] (squeezedsp.filters FIRWavFile_loop)
+    var BAND = null;        // the equaliser band the graph draws on its own (the classic page's currentFilterIndex)
+    var FIR_PICK = null;    // a FIR just imported from AutoEQ, to select once the server's list holds it
     var GEN = 0;            // bumped by every local change: a settings read sent before one is stale
     var NEED = { players: true, settings: true, presets: true, logs: true };
     var T = { players: 0, settings: 0, presets: 0, logs: 0 };
@@ -152,6 +185,14 @@
     var TARGETS = ['family', 'fixed'];
     var TARGET_NAMES = { family: 'Per family', fixed: 'Player max' };
     var MAXRATES = [0, 768000, 384000, 192000, 96000];   // 0: the player's own top rate (Upsample.pm @MAXRATES)
+    // the equaliser's band types (the classic page's filterTypes), crossfeed's settings (its crossfeed-selector)
+    var PEQ_TYPES = ['peak', 'lowshelf', 'highshelf', 'lowpass', 'highpass'];
+    var XFEEDS = ['off', 'light', 'medium', 'strong', 'bonkers'];
+    var XFEED_NAMES = { off: 'Off', light: 'Light', medium: 'Medium', strong: 'Strong', bonkers: 'Bonkers' };
+    // what Reset keeps (the classic page's LocalClearSettings): how the player is fed, not its DSP
+    var RESET_KEEP = ['OutputFormat', 'Upsample', 'UpsamplePCMFilterCD', 'UpsamplePCMFilterHiRes', 'UpsampleTarget', 'UpsampleMax',
+                      'UpsampleDSDRate', 'UpsampleFilterCD', 'UpsampleFilterHiRes', 'DSDCutoff', 'DSDGain', 'DSDOut', 'DSDOutMod',
+                      'DSDOutDSP', 'DSDIntegrator', 'ExactLength'];
     var ROLE_NAMES = { 'flac-dec': 'FLAC decode', 'flac-enc': 'FLAC encode', soxr: 'soxr', soxrate: 'SoX rate',
                        level: 'level', dsp: 'DSP', sox: 'SoX', ffmpeg: 'ffmpeg', wavlength: 'WAV length', dsd: 'DSD decode',
                        'mp3-enc': 'MP3 encode', 'opus-enc': 'Opus encode', 'ogg-enc': 'Vorbis encode' };
@@ -162,6 +203,14 @@
 
     function client() { return DATA ? DATA.Client : null; }
     function dirty() { return Object.keys(PENDING).length > 0; }
+    // the player's settings as the page shows them: what is stored, with what waits for Apply over it
+    function view() {
+        var c = client();
+        if (!c || !dirty()) { return c; }
+        var v = clone(c);
+        Object.keys(PENDING).forEach(function (k) { setPath(v, k, clone(PENDING[k])); });
+        return v;
+    }
 
     // ---------------------------------------------------------------- the player
     function param(name) {
@@ -223,7 +272,9 @@
                 // the Sample Rate Converter to DSD: DSD out, and the resampler (an older server: none)
                 upDsdOk: num(r.up_dsd_ok, 0) === 1,
                 // LMS's "Prefer native format", which SqueezeDSP needs off (an older server: none)
-                preferNative: num(r.prefer_native, 0) === 1
+                preferNative: num(r.prefer_native, 0) === 1,
+                // the engine's debug log, every player's (squeezedsp.debuglog; an older server: none)
+                debugLog: num(r.debug_log, 0) === 1
             };
             renderNative();
             // a change of ours went out after this was asked for, or is still going out
@@ -269,7 +320,20 @@
                 var name = path.split(/[\\/]/).pop().replace(/\.preset\.json$/i, '');
                 return { path: path, name: name };
             });
+            // and the impulse files (the same answer: the classic page's LocalBuildLists)
+            FIRS = (r.FIRWavFile_loop || []).map(function (p) {
+                var path = String(p[0] !== undefined ? p[0] : p);
+                return { path: path, file: baseName(path) };
+            });
             renderPresets();
+            renderFirs();
+            // a FIR AutoEQ just imported: selected for this player once the list holds it (Simon 2026-11-20: loading it,
+            // in place of the one there, "is to be expected")
+            if (FIR_PICK && FIR_PICK.pid === pid) {
+                var want = FIR_PICK.file.toLowerCase(), hit = null;
+                FIRS.forEach(function (f) { if (f.file.toLowerCase() === want) { hit = f; } });
+                if (hit) { FIR_PICK = null; change('FIRWavFile', hit.path); }
+            }
         });
     }
 
@@ -394,10 +458,12 @@
         });
     }
 
+    // a switch or a choice: saved at once (key: its settings path); what waits for Apply under that path goes
     function change(key, value) {
         var c = client();
         if (!c) { return; }
-        c[key] = value;
+        setPath(c, key, value);
+        delete PENDING[key];
         GEN++;
         renderControls();
         save();
@@ -434,6 +500,24 @@
         // "Exact track length" (the player's own, Simon 2026-11-15): beside the DSP switch, dimmed while the DSP is off
         UI.exact = control(db, 'exact', L.exact || 'Exact track length', L.exactHelp);
         UI.exactSw = UI.exact.c.appendChild(switchButton(function (on) { change('ExactLength', on ? 1 : 0); }));
+        // Reset and Apply, on every tab (the classic page's pair beside its DSP switch): Reset puts every DSP setting back
+        // to a new player's and waits for Apply, as there; Apply shows while anything waits, whichever tab holds it
+        var acts = db.appendChild(make('div', 'dspacts'));
+        UI.reset = acts.appendChild(make('button', 'btn danger', L.reset || 'Reset'));
+        UI.reset.type = 'button';
+        UI.reset.addEventListener('click', resetAll);
+        var ar = acts.appendChild(make('div', 'applyrow'));
+        UI.apply = ar.appendChild(make('button', 'btn primary', L.apply || 'Apply'));
+        UI.apply.type = 'button';
+        UI.apply.addEventListener('click', function () {
+            var c = client();
+            if (!c || !dirty()) { return; }
+            Object.keys(PENDING).forEach(function (k) { setPath(c, k, clone(PENDING[k])); });
+            PENDING = {};
+            GEN++;
+            renderControls();
+            save();
+        });
         app.appendChild(db);
 
         // the signal path, and its speed as the headline
@@ -459,7 +543,16 @@
             rows.appendChild(row);
             UI.rows[r[0]] = { row: row, v: v };
         });
+        // the clipping row's Clear Log (the classic page's): the engine's log, every player's
+        UI.clearLog = UI.rows.clip.row.appendChild(make('button', 'btn small', L.clearLog || 'Clear Log'));
+        UI.clearLog.type = 'button';
+        UI.clearLog.addEventListener('click', clearLog);
         st.appendChild(rows);
+        // the engine's debug log (Simon 2026-11-20: a switch, not a hand edit of the engine's config): every player's,
+        // saved at once
+        UI.debug = control(st, 'debuglog', L.debugLog || 'Debug log', L.debugLogHelp);
+        UI.debugSw = UI.debug.c.appendChild(switchButton(setDebug));
+        UI.debug.row.classList.add('sw-row');
         app.appendChild(st);
 
         // the settings, a tab per category (Simon 2026-11-03: "for this view we need tabs per settings category",
@@ -515,44 +608,36 @@
         UI.presetDel.addEventListener('click', deletePreset);
         UI.presetSave.addEventListener('click', savePreset);
         UI.presetName.addEventListener('keydown', function (e) { if (e.key === 'Enter') { savePreset(); } });
+        // the classic page's help for both rows
+        tip(UI.presetSel, L.presetHelp);
+        tip(UI.presetName, L.presetHelp);
 
-        // DSP: its settings (on or off is at the top; the rest still on the classic page)
+        // DSP: its settings (on or off is at the top), the classic page's DSP tab in its order: preamp, ReplayGain (its
+        // mode and gains shown while it is on), delay, balance, width, loudness (its level shown while it is on)
         var cc = pane('dsp', L.dsp || 'DSP', L.dspHelp);
         cc.classList.add('controls');
+        UI.dspOffNote = cc.appendChild(make('div', 'note dspoffnote'));
         UI.sliders = {};
-        [['Preamp', L.preamp || 'Preamp (dB)', L.preampHelp, -30, 0, ' dB'],
-         ['Balance', L.balance || 'Balance', L.balanceHelp, -12, 12, ''],
-         ['Width', L.width || 'Width', L.widthHelp, -12, 12, '']].forEach(function (s) {
-            var ctl = control(cc, s[0], s[1], s[2]);
-            var range = make('input', 'range');
-            range.type = 'range'; range.min = s[3]; range.max = s[4]; range.step = '0.1';
-            range.setAttribute('aria-label', s[1]);
-            var val = make('span', 'val');
-            ctl.c.appendChild(range);
-            ctl.c.appendChild(val);
-            var key = s[0], unit = s[5];
-            function pend(v) {
-                PENDING[key] = Math.round(Number(v) * 10) / 10;
-                renderSliders();
-            }
-            range.addEventListener('input', function () { pend(range.value); });
-            // the classic page's own gesture: a double click puts balance and width back to centre
-            if (key !== 'Preamp') { range.addEventListener('dblclick', function () { range.value = 0; pend(0); }); }
-            UI.sliders[key] = { ctl: ctl, range: range, val: val, unit: unit };
-        });
-        var ar = cc.appendChild(make('div', 'applyrow'));
-        UI.apply = ar.appendChild(make('button', 'btn primary', L.apply || 'Apply'));
-        UI.apply.type = 'button';
-        UI.apply.addEventListener('click', function () {
-            var c = client();
-            if (!c || !dirty()) { return; }
-            Object.keys(PENDING).forEach(function (k) { c[k] = PENDING[k]; });
-            PENDING = {};
-            GEN++;
-            renderControls();
-            save();
-        });
-        classicLink(cc, L.dspClassic || 'ReplayGain, delay and loudness are on the classic page for now.');
+        UI.numbers = {};
+        slider(cc, 'Preamp', L.preamp || 'Preamp (dB)', L.preampHelp, -30, 0, 0.1, ' dB', 0, false);
+        UI.rg = control(cc, 'replaygain', L.replayGain || 'Replay Gain', L.replayGainHelp);
+        UI.rgSw = UI.rg.c.appendChild(switchButton(function (on) { change('ReplayGain.enabled', on ? 1 : 0); }));
+        UI.rg.row.classList.add('sw-row');
+        UI.rgOpts = cc.appendChild(make('div', 'opts'));
+        UI.rgMode = control(UI.rgOpts, 'rgmode', L.rgMode || 'Mode', null, true);
+        UI.rgModeSeg = segment(UI.rgMode.c, [['3', L.rgSmart || 'Smart'], ['1', L.rgTrack || 'Track only'], ['2', L.rgAlbum || 'Album only']],
+                               function (v) { change('ReplayGain.mode', Number(v)); });
+        numberBox(UI.rgOpts, 'ReplayGain.fixed_gain', L.rgFixed || 'Fixed fallback gain (dB)', null, -20, 0, 0.1, -6);
+        numberBox(UI.rgOpts, 'ReplayGain.spotify_gain', L.spotifyGain || 'Spotify Gain (dB)', L.spotifyGainHelp, -20, 0, 0.1, -4);
+        // the classic page's own gesture: a double click puts delay, balance and width back to centre
+        slider(cc, 'Delay.delay', L.delay || 'Delay (ms)', L.delayHelp, -20, 20, 0.1, '', 0, true);
+        slider(cc, 'Balance', L.balance || 'Balance', L.balanceHelp, -12, 12, 0.1, '', 0, true);
+        slider(cc, 'Width', L.width || 'Width', L.widthHelp, -12, 12, 0.1, '', 0, true);
+        UI.loud = control(cc, 'loudness', L.loudness || 'Loudness', L.loudnessHelp);
+        UI.loudSw = UI.loud.c.appendChild(switchButton(function (on) { change('Loudness.enabled', on ? 1 : 0); }));
+        UI.loud.row.classList.add('sw-row');
+        UI.loudOpts = cc.appendChild(make('div', 'opts'));
+        slider(UI.loudOpts, 'Loudness.listening_level', L.loudLevel || 'Listening Level', L.loudLevelHelp, 50, 85, 0.1, '', 85, false, true);
 
         // Sample Rate Converter: off, PCM (its target and max rate) or DSD (its rate)
         var sc = pane('src', L.src || 'Sample Rate Converter', L.srcHelp);
@@ -619,19 +704,95 @@
                                    return [r, r === '352800' ? 'DXD 352.8 kHz' : r === 'native' ? (L.dsdNative || 'Native') : rate(r)];
                                }), function (v) { change('DSDOutDSP', v === 'native' ? v : Number(v)); });
 
-        // PEQ, Convolution, Crossfeed: still on the classic page (Simon 2026-11-03: "PEQ and Filters each have their own
-        // tabs as PEQ and Convolution", "as would crossfeed")
-        [['peq', L.tabPeq || 'PEQ', L.peqClassic], ['conv', L.tabConv || 'Convolution', L.convClassic],
-         ['xfeed', L.tabXfeed || 'Crossfeed', L.xfeedClassic]].forEach(function (t) {
-            classicLink(pane(t[0], t[1]), t[2] || '');
+        // PEQ (the classic page's equaliser): the response graph (Fox's own plotter and filter maths, sqdsp_graph.js and
+        // sqdsp_peq_lib.js, so both pages draw the same curve), a type and Add, the bands, a filter file's import and
+        // AutoEQ's headphone search
+        var pq = pane('peq', L.tabPeq || 'PEQ');
+        pq.classList.add('controls', 'peq');
+        UI.peqOffNote = pq.appendChild(make('div', 'note dspoffnote'));
+        UI.graphBox = pq.appendChild(make('div', 'graph hide'));
+        UI.graphBox.id = 'peqGraphContainer';     // the plotter reads its theme from this element ('dark')
+        UI.graphBox.classList.toggle('dark', document.documentElement.className !== 'lt');
+        UI.graph = UI.graphBox.appendChild(make('div'));
+        UI.graph.id = 'peqGraph';
+        var add = control(pq, 'peqadd', noColon(L.peqBands || 'PEQ Bands'), L.peqHelp);
+        UI.addType = 'peak';
+        UI.addSeg = segment(add.c, PEQ_TYPES.map(function (t) { return [t, typeName(t)]; }), function (v) {
+            UI.addType = v;
+            setSegment(UI.addSeg, v);
         });
+        PEQ_TYPES.forEach(function (t) { tip(UI.addSeg[t], typeHelp(t)); });
+        setSegment(UI.addSeg, UI.addType);
+        UI.addBtn = add.c.appendChild(make('button', 'btn', L.add || 'Add'));
+        UI.addBtn.type = 'button';
+        UI.addBtn.addEventListener('click', addBand);
+        UI.bands = pq.appendChild(make('div', 'bands'));
+        pq.appendChild(make('div', 'grp', L.importFilters || 'Import Filters'));
+        UI.drop = pq.appendChild(make('div', 'drop'));
+        UI.drop.appendChild(make('span', 'drop-t', L.dropZone || 'Drop a REW or FIR WAV file here'));
+        UI.filePick = UI.drop.appendChild(make('input', 'hide'));
+        UI.filePick.type = 'file';
+        UI.filePick.accept = '.txt,.wav,text/plain,audio/wav';
+        var choose = UI.drop.appendChild(make('button', 'btn', L.chooseFile || 'Choose REW or WAV File'));
+        choose.type = 'button';
+        choose.addEventListener('click', function () { UI.filePick.click(); });
+        UI.filePick.addEventListener('change', function () {
+            var files = UI.filePick.files;
+            if (files && files.length > 1) { fileNote(L.fileOne || 'One file at a time'); }
+            else if (files && files.length) { importFile(files[0]); }
+            UI.filePick.value = '';
+        });
+        ['dragenter', 'dragover'].forEach(function (ev) {
+            UI.drop.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); UI.drop.classList.add('over'); });
+        });
+        UI.drop.addEventListener('dragleave', function () { UI.drop.classList.remove('over'); });
+        UI.drop.addEventListener('drop', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            UI.drop.classList.remove('over');
+            var files = e.dataTransfer && e.dataTransfer.files;
+            if (files && files.length > 1) { fileNote(L.fileOne || 'One file at a time'); }
+            else if (files && files.length) { importFile(files[0]); }
+        });
+        UI.fileNote = pq.appendChild(make('div', 'note filenote'));
+        UI.aeq = control(pq, 'autoeq', [L.headphoneEq || 'Headphone', L.headphoneEqExp || 'EQ'].join(' '), L.headphoneEqHelp);
+        UI.aeqInput = UI.aeq.c.appendChild(make('input', 'aeq'));
+        UI.aeqInput.type = 'text';
+        UI.aeqInput.autocomplete = 'off';
+        UI.aeqInput.spellcheck = false;
+        UI.aeqInput.placeholder = L.headphoneEqFind || 'Type headphone name (min. 2 chars)...';
+        UI.aeqInput.setAttribute('aria-label', [L.headphoneEq || 'Headphone', L.headphoneEqExp || 'EQ'].join(' '));
+        UI.aeqList = pq.appendChild(make('div', 'aeqlist hide'));
+        UI.aeqInput.addEventListener('focus', function () { aeqIndex(); });
+        UI.aeqInput.addEventListener('input', aeqSearchSoon);
+        UI.aeqInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { aeqShow([]); } });
 
-        // the rest is on the classic page
-        var more = make('div', 'more');
-        var a = make('a', null, L.more || 'Equaliser, filters and the rest are on the full settings page.');
-        a.href = '/plugins/SqueezeDSP/index.html?player=' + encodeURIComponent(PID);
-        more.appendChild(a);
-        app.appendChild(more);
+        // Convolution (the classic page's): the room-correction impulse, which saves at once, and its strength
+        var cv = pane('conv', L.tabConv || 'Convolution', L.firHelp);
+        cv.classList.add('controls');
+        UI.convOffNote = cv.appendChild(make('div', 'note dspoffnote'));
+        UI.fir = control(cv, 'fir', noColon(L.firFile || 'Load FIR File'), L.firHelp);
+        UI.firSel = UI.fir.c.appendChild(make('select', 'filter'));
+        UI.firSel.setAttribute('aria-label', noColon(L.firFile || 'Load FIR File'));
+        UI.firSel.addEventListener('change', function () { change('FIRWavFile', UI.firSel.value); });
+        slider(cv, 'FIRStrength', L.firStrength || 'FIR Strength', L.firStrengthHelp, 0, 100, 1, '', 100, false);
+
+        // Crossfeed (the classic page's): saves at once
+        var xf = pane('xfeed', L.tabXfeed || 'Crossfeed', L.crossfeedHelp);
+        xf.classList.add('controls');
+        UI.xfOffNote = xf.appendChild(make('div', 'note dspoffnote'));
+        UI.xf = control(xf, 'crossfeed', L.crossfeed || 'Crossfeed', L.crossfeedHelp);
+        UI.xfSeg = segment(UI.xf.c, XFEEDS.map(function (x) { return [x, XFEED_NAMES[x]]; }), function (v) { change('Crossfeed', v); });
+
+        // support: Fox's Ko-fi and Simon's Buy Me a Coffee (Simon 2026-11-20), plain links, no outside script
+        var sup = make('div', 'support');
+        [['https://ko-fi.com/Y8Y31UOE3D', 'Ko-fi (Foxenfurter)'], ['https://buymeacoffee.com/crystalgipsy', 'Buy me a coffee (CrystalGipsy)']].forEach(function (l) {
+            var a = sup.appendChild(make('a', 'btn', l[1]));
+            a.href = l[0];
+            a.target = '_blank';
+            a.rel = 'noopener';
+        });
+        app.appendChild(sup);
 
         UI.dsp.row.classList.add('sw-row');
         UI.exact.row.classList.add('sw-row');
@@ -695,15 +856,75 @@
             UI.tabs[k].setAttribute('aria-selected', k === key ? 'true' : 'false');
         });
         try { window.localStorage.setItem('sqdsp-tab', key); } catch (e) {}
+        if (key === 'peq') { drawGraphSoon(); }    // the graph has a size only while its tab shows
     }
 
-    // what is still on the classic page: said so, and a link to it
-    function classicLink(parent, text) {
-        var m = parent.appendChild(make('div', 'note classic'));
-        if (text) { m.appendChild(make('span', null, text + ' ')); }
-        var a = m.appendChild(make('a', null, L.openClassic || 'Open the classic page'));
-        a.href = '/plugins/SqueezeDSP/index.html?player=' + encodeURIComponent(PID);
-        return m;
+    // a slider with its number box (the classic page's pair), both waiting for Apply. key: its settings path; dflt: its
+    // value when the settings hold none; centre: a double click puts it back to 0; sub: a sub-row
+    function slider(parent, key, label, help, min, max, step, unit, dflt, centre, sub) {
+        var ctl = control(parent, key, label, help, sub);
+        var range = make('input', 'range');
+        range.type = 'range'; range.min = min; range.max = max; range.step = String(step);
+        range.setAttribute('aria-label', label);
+        var val = make('span', 'val');
+        var box = val.appendChild(make('input', 'num'));
+        box.type = 'number'; box.min = min; box.max = max; box.step = String(step);
+        box.setAttribute('aria-label', label);
+        if (unit) { val.appendChild(make('span', 'unit', unit)); }
+        ctl.c.appendChild(range);
+        ctl.c.appendChild(val);
+        var s = { ctl: ctl, range: range, val: val, box: box, unit: unit, min: min, max: max, step: step, dflt: dflt };
+        function pend(v) {
+            PENDING[key] = clampStep(v, s);
+            renderSliders();
+            if (key === 'Loudness.listening_level') { drawGraphSoon(); }
+        }
+        range.addEventListener('input', function () { pend(range.value); });
+        // a typed value, once committed, shown as kept (held to its range and step) though the box still has the focus
+        box.addEventListener('change', function () {
+            if (box.value === '') {
+                var was = has(PENDING, key) ? PENDING[key] : num(getPath(client() || {}, key), dflt);
+                box.value = Number(was).toFixed(decimals(step));
+                return;
+            }
+            pend(box.value);
+            box.value = PENDING[key].toFixed(decimals(step));
+        });
+        if (centre) { range.addEventListener('dblclick', function () { range.value = 0; pend(0); }); }
+        UI.sliders[key] = s;
+        return s;
+    }
+
+    // a number box alone (ReplayGain's gains, as on the classic page), waiting for Apply
+    function numberBox(parent, key, label, help, min, max, step, dflt) {
+        var ctl = control(parent, key, label, help, true);
+        var val = ctl.c.appendChild(make('span', 'val'));
+        var box = val.appendChild(make('input', 'num'));
+        box.type = 'number'; box.min = min; box.max = max; box.step = String(step);
+        box.setAttribute('aria-label', label);
+        var s = { ctl: ctl, val: val, box: box, min: min, max: max, step: step, dflt: dflt };
+        box.addEventListener('change', function () {
+            if (box.value === '') {
+                var was = has(PENDING, key) ? PENDING[key] : num(getPath(client() || {}, key), dflt);
+                box.value = Number(was).toFixed(decimals(step));
+                return;
+            }
+            PENDING[key] = clampStep(box.value, s);
+            renderSliders();
+            box.value = PENDING[key].toFixed(decimals(step));
+        });
+        UI.numbers[key] = s;
+        return s;
+    }
+
+    function decimals(step) { var t = String(step); return t.indexOf('.') < 0 ? 0 : t.length - t.indexOf('.') - 1; }
+    // a typed or slid value inside its range, on its step (the classic page's valInputDecimal holds it to the range)
+    function clampStep(v, s) {
+        var n = Number(v);
+        if (!isFinite(n)) { n = s.dflt; }
+        n = Math.min(s.max, Math.max(s.min, n));
+        var f = Math.pow(10, decimals(s.step));
+        return Math.round(n * f) / f;
     }
 
     function control(parent, key, label, help, sub) {
@@ -850,12 +1071,15 @@
     function renderControls() {
         if (!UI) { return; }
         renderNative();
-        var c = client(), can = CAN;
+        // what is stored, with what waits for Apply over it (Reset, a slider, a band)
+        var c = view(), can = CAN;
         var ready = !!(c && can);
         Object.keys(UI.panes).forEach(function (k) { if (k !== 'presets') { UI.panes[k].classList.toggle('dimmed', !ready); } });
         if (!ready) {
             UI.dspSw.disabled = true;
             UI.exactSw.disabled = true;
+            UI.debugSw.disabled = true;
+            UI.reset.disabled = true;
             return;
         }
         var dspOn = String(c.Bypass) === '0';
@@ -918,10 +1142,32 @@
         UI.dsdInt.note.textContent = native ? '' : (L.dsdNativeOnly || 'With the DSP rate Native');
 
         // what DSP on drives: dimmed while it is off, still editable, and the tabs that hold it say so
-        ['src', 'pcm', 'dsd'].forEach(function (k) { UI.panes[k].classList.toggle('dimmed', !dspOn); });
-        [UI.srcOffNote, UI.pcmOffNote, UI.dsdOffNote].forEach(function (n) { n.textContent = dspOn ? '' : (L.dspOffTab || ''); });
+        // DSP tab: ReplayGain and loudness, their options shown only while they are on (as the classic page)
+        var rg = c.ReplayGain || {}, rgOn = truthy(rg.enabled);
+        setSwitch(UI.rgSw, rgOn, false);
+        UI.rgOpts.classList.toggle('hide', !rgOn);
+        var mode = String(num(rg.mode, 3));
+        setSegment(UI.rgModeSeg, ['1', '2', '3'].indexOf(mode) >= 0 ? mode : '3');
+        var loudOn = truthy((c.Loudness || {}).enabled);
+        setSwitch(UI.loudSw, loudOn, false);
+        UI.loudOpts.classList.toggle('hide', !loudOn);
+        // Crossfeed as the engine takes it (any case), else off
+        var xv = String(c.Crossfeed == null ? '' : c.Crossfeed).toLowerCase();
+        setSegment(UI.xfSeg, XFEEDS.indexOf(xv) >= 0 ? xv : 'off');
+        // the engine's debug log, every player's
+        setSwitch(UI.debugSw, !!can.debugLog, false);
+        UI.reset.disabled = false;
+
+        // what DSP on drives: every tab but Presets dimmed while it is off, still editable, each saying so (the classic
+        // page's DSP-off panes)
+        ['dsp', 'src', 'pcm', 'dsd', 'peq', 'conv', 'xfeed'].forEach(function (k) { UI.panes[k].classList.toggle('dimmed', !dspOn); });
+        [UI.dspOffNote, UI.srcOffNote, UI.pcmOffNote, UI.dsdOffNote, UI.peqOffNote, UI.convOffNote, UI.xfOffNote].forEach(function (n) {
+            n.textContent = dspOn ? '' : (L.dspOffTab || '');
+        });
         Object.keys(UI.sliders).forEach(function (k) { UI.sliders[k].ctl.row.classList.toggle('dimmed', !dspOn); });
         renderSliders();
+        renderFirs();
+        renderPEQ();
         tipRefresh();   // a greyed button's why may have changed
     }
 
@@ -952,18 +1198,396 @@
     function renderSliders() {
         if (!UI) { return; }
         var c = client() || {};
-        Object.keys(UI.sliders).forEach(function (k) {
-            var s = UI.sliders[k];
-            var pending = Object.prototype.hasOwnProperty.call(PENDING, k);
-            var v = pending ? PENDING[k] : num(c[k], 0);
-            // never move a thumb the user is holding
-            if (document.activeElement !== s.range || !pending) { s.range.value = v; }
-            s.range.disabled = !DATA;
-            s.val.textContent = (v > 0 && k !== 'Preamp' ? '+' : '') + v.toFixed(1) + s.unit;
+        function shown(s, k) {
+            var pending = has(PENDING, k);
+            var v = pending ? PENDING[k] : num(getPath(c, k), s.dflt);
+            // never move a thumb the user is holding, nor a number being typed
+            if (s.range && (document.activeElement !== s.range || !pending)) { s.range.value = v; }
+            if (document.activeElement !== s.box) { s.box.value = v.toFixed(decimals(s.step)); }
+            if (s.range) { s.range.disabled = !DATA; }
+            s.box.disabled = !DATA;
             s.val.classList.toggle('pending', pending);
-        });
+        }
+        Object.keys(UI.sliders).forEach(function (k) { shown(UI.sliders[k], k); });
+        Object.keys(UI.numbers).forEach(function (k) { shown(UI.numbers[k], k); });
         UI.apply.disabled = !dirty();
         UI.apply.parentNode.classList.toggle('hide', !dirty());
+    }
+
+    // Reset (the classic page's LocalClearSettings): every DSP setting back to a new player's, waiting for Apply as
+    // there; how the player is fed kept (RESET_KEEP); the DSP left on
+    function resetAll() {
+        if (!client()) { return; }
+        var d = defaults();
+        d.Bypass = 0;
+        Object.keys(d).forEach(function (k) {
+            if (RESET_KEEP.indexOf(k) >= 0) { return; }
+            var v = d[k];
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+                Object.keys(v).forEach(function (sub) { PENDING[k + '.' + sub] = v[sub]; });
+            } else {
+                PENDING[k] = clone(v);
+            }
+        });
+        BAND = null;
+        renderControls();
+    }
+
+    // Clear Log (the classic page's): the engine's log emptied, every player's; the peaks read again
+    function clearLog() {
+        var pid = PID;
+        rpc(pid, ['squeezedsp.clearlog']).then(function (r) {
+            if (r && r._success !== undefined && num(r._success, 0) !== 1) { throw new Error(r._message || 'not cleared'); }
+            if (pid !== PID) { return; }
+            PEAKS = [];
+            NEED.logs = true;
+            renderStatus();
+        }).catch(function (e) {
+            var el = $('err');
+            if (el) { el.textContent = e.message; }
+        });
+    }
+
+    // the engine's debug log, on or off for every player (squeezedsp.debuglog), saved at once
+    function setDebug(on) {
+        if (!UI || !CAN) { return; }
+        UI.debugSw.disabled = true;
+        rpc('', ['squeezedsp.debuglog', 'set:' + (on ? 1 : 0)]).then(function (r) {
+            if (CAN) { CAN.debugLog = num(r.debug, 0) === 1; }
+            flash(L.saved || 'Saved');
+        }, function (e) {
+            var el = $('err');
+            if (el) { el.textContent = fmt(L.saveFailed || 'Not saved: %s', e.message); }
+        }).then(renderControls);
+    }
+
+    // ---------------------------------------------------------------- Convolution
+    // The impulse files as a dropdown, None first; the stored one matched by its path, else by its file's name (the
+    // classic page's highlightMatchingOption), else shown by its name. Rebuilt only when its options change.
+    function renderFirs() {
+        if (!UI || !UI.firSel) { return; }
+        var c = view() || {};
+        var stored = String(c.FIRWavFile == null || c.FIRWavFile === '' ? '-' : c.FIRWavFile);
+        var cur = firValue(stored);
+        var opts = [['-', L.firNone || 'None']].concat(FIRS.map(function (f) { return [f.path, f.file]; }));
+        if (cur !== '-' && !opts.some(function (o) { return o[0] === cur; })) { opts.push([cur, baseName(cur)]); }
+        var sig = JSON.stringify(opts);
+        if (sig !== UI.firSig) {
+            UI.firSig = sig;
+            UI.firSel.textContent = '';
+            opts.forEach(function (o) {
+                var e = UI.firSel.appendChild(make('option', null, o[1]));
+                e.value = o[0];
+            });
+        }
+        if (document.activeElement !== UI.firSel) { UI.firSel.value = cur; }
+        UI.firSel.disabled = !DATA;
+    }
+    function firValue(stored) {
+        if (!stored || stored === '-') { return '-'; }
+        var norm = function (p) { return String(p).replace(/\\/g, '/'); };
+        var stem = function (p) { return baseName(p).split('.')[0]; };
+        var i;
+        for (i = 0; i < FIRS.length; i++) { if (norm(FIRS[i].path) === norm(stored)) { return FIRS[i].path; } }
+        for (i = 0; i < FIRS.length; i++) { if (stem(FIRS[i].path) === stem(stored)) { return FIRS[i].path; } }
+        return stored;
+    }
+
+    // ---------------------------------------------------------------- the equaliser
+    function typeName(t) {
+        return { peak: L.peak || 'Peak', lowshelf: L.lowShelf || 'Low Shelf', highshelf: L.highShelf || 'High Shelf',
+                 lowpass: L.lowPass || 'Low Pass', highpass: L.highPass || 'High Pass' }[t] || t;
+    }
+    function typeHelp(t) {
+        return { peak: L.peakHelp, lowshelf: L.lowShelfHelp, highshelf: L.highShelfHelp, lowpass: L.lowPassHelp, highpass: L.highPassHelp }[t];
+    }
+    function bandsOf(c) { return Array.isArray(c && c.Filters) ? c.Filters : []; }
+    // the bands to change: those waiting for Apply, else a copy of the stored ones, which then wait
+    function editBands() {
+        if (!has(PENDING, 'Filters')) { PENDING.Filters = clone(bandsOf(client())); }
+        return PENDING.Filters;
+    }
+    // a band as Add makes it (the classic page's AddPEQBand: PEQ_BAND_DEFAULTS, sqdsp_peq_lib.js)
+    function addBand() {
+        if (!client() || typeof PEQ_BAND_DEFAULTS === 'undefined') { return; }
+        var list = editBands(), d = PEQ_BAND_DEFAULTS[UI.addType] || PEQ_BAND_DEFAULTS.peak;
+        list.push({ FilterType: UI.addType, Frequency: d.Frequency, Gain: d.Gain, Slope: d.Slope, SlopeType: d.SlopeType });
+        BAND = list.length - 1;
+        renderControls();
+    }
+    function removeBand(i) {
+        var list = editBands();
+        if (i < 0 || i >= list.length) { return; }
+        list.splice(i, 1);
+        BAND = null;
+        renderControls();
+    }
+    // a band's type: between peak and shelf its Q and Slope convert exactly at its gain (the classic page's
+    // handleFilterTypeChange, as fixed in 0.1.72.57); a shelf holding a Q keeps it
+    function bandType(i, t) {
+        var list = editBands(), f = list[i];
+        if (!f) { return; }
+        var wasShelf = /shelf/.test(String(f.FilterType).toLowerCase()), isShelf = /shelf/.test(t);
+        f.FilterType = t;
+        if (wasShelf !== isShelf && typeof peqShelfQToSlope === 'function') {
+            if (isShelf && f.SlopeType === 'Q') { f.SlopeType = 'slope'; f.Slope = peqShelfQToSlope(f.Slope, f.Gain); }
+            else if (!isShelf && f.SlopeType === 'slope') { f.SlopeType = 'Q'; f.Slope = peqShelfSlopeToQ(f.Slope, f.Gain); }
+        }
+        BAND = i;
+        renderControls();
+    }
+    // the frequency slider's position, log scaled from 20 Hz to 20 kHz, and back (the classic page's log2LinearMapper,
+    // and logScaleMapper with its rounding)
+    function freqToPos(f) {
+        var lo = Math.log10(20), hi = Math.log10(20000);
+        return Math.max(0, Math.min(100, (Math.log10(Math.max(1, Number(f) || 1000)) - lo) / (hi - lo) * 100));
+    }
+    function posToFreq(p) {
+        var lo = Math.log10(20), hi = Math.log10(20000);
+        var f = Math.round(Math.pow(10, lo + (hi - lo) * Number(p) / 100));
+        var r = f > 12000 ? 1000 : f >= 5000 ? 100 : f >= 1000 ? 10 : f > 30 ? 5 : 1;
+        return Math.round(f / r) * r;
+    }
+
+    // The bands, rebuilt only when they change from outside their own rows (a settings read, Add, a type, a file);
+    // a band's own slider or number changes only its values, so a thumb in use is never replaced
+    function renderPEQ() {
+        if (!UI || !UI.bands) { return; }
+        var list = bandsOf(view() || {});
+        var sig = JSON.stringify(list);
+        var busy = UI.bands.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+        if (sig !== UI.bandSig && !busy) {
+            UI.bandSig = sig;
+            UI.bands.textContent = '';
+            list.forEach(function (f, i) { UI.bands.appendChild(bandCard(f, i)); });
+        }
+        var waiting = has(PENDING, 'Filters');
+        Array.prototype.forEach.call(UI.bands.querySelectorAll('.val'), function (v) { v.classList.toggle('pending', waiting); });
+        Array.prototype.forEach.call(UI.bands.querySelectorAll('input'), function (e) { e.disabled = !DATA; });
+        drawGraphSoon();
+    }
+
+    function bandCard(f, i) {
+        var card = make('div', 'band');
+        card.dataset.i = i;
+        var head = card.appendChild(make('div', 'band-h'));
+        head.appendChild(make('span', 'band-n', fmt(L.band || 'Band %s', i + 1)));
+        var type = String(f.FilterType || 'peak').toLowerCase();
+        if (PEQ_TYPES.indexOf(type) < 0) { type = 'peak'; }
+        var seg = segment(head, PEQ_TYPES.map(function (t) { return [t, typeName(t)]; }), function (v) { bandType(i, v); });
+        PEQ_TYPES.forEach(function (t) { tip(seg[t], typeHelp(t)); });
+        setSegment(seg, type);
+        var x = head.appendChild(make('button', 'btn x', '\u00d7'));
+        x.type = 'button';
+        x.setAttribute('aria-label', fmt(L.band || 'Band %s', i + 1) + ': ' + (L.remove || 'Remove'));
+        x.addEventListener('click', function () { removeBand(i); });
+        var pass = type === 'lowpass' || type === 'highpass', slope = f.SlopeType === 'slope';
+        bandRow(card, f, i, 'Frequency', L.freq || 'Frequency', null, 20, 20000, 1, true);
+        if (!pass) { bandRow(card, f, i, 'Gain', L.gain || 'Gain', null, -25, 15, 0.1, false); }
+        bandRow(card, f, i, 'Slope', slope ? 'Slope' : 'Q', slope ? L.slopeHelp : L.qHelp, slope ? 0.05 : 0.1, slope ? 1.2 : 20, 0.01, false);
+        card.addEventListener('pointerdown', function () { if (BAND !== i) { BAND = i; drawGraphSoon(); } });
+        card.addEventListener('focusin', function () { if (BAND !== i) { BAND = i; drawGraphSoon(); } });
+        return card;
+    }
+
+    // one of a band's values: a slider (log scaled for the frequency) and its number box, both waiting for Apply; a
+    // double click puts the gain back to 0 (the classic page's)
+    function bandRow(card, f, i, prop, label, help, min, max, step, log) {
+        var ctl = control(card, 'band' + i + prop, label, help, true);
+        var range = make('input', 'range');
+        range.type = 'range';
+        if (log) { range.min = 0; range.max = 100; range.step = '0.01'; } else { range.min = min; range.max = max; range.step = String(step); }
+        range.setAttribute('aria-label', fmt(L.band || 'Band %s', i + 1) + ' ' + label);
+        var val = make('span', 'val');
+        var box = val.appendChild(make('input', 'num'));
+        box.type = 'number'; box.min = min; box.max = max; box.step = String(step);
+        box.setAttribute('aria-label', fmt(L.band || 'Band %s', i + 1) + ' ' + label);
+        ctl.c.appendChild(range);
+        ctl.c.appendChild(val);
+        var lim = { min: min, max: max, step: step, dflt: num(f[prop], min) };
+        function show(v) {
+            if (document.activeElement !== range) { range.value = log ? freqToPos(v) : v; }
+            if (document.activeElement !== box) { box.value = Number(v).toFixed(decimals(step)); }
+        }
+        show(clampStep(f[prop], lim));
+        function set(v) {
+            var list = editBands();
+            if (!list[i]) { return; }
+            v = clampStep(v, lim);
+            list[i][prop] = v;
+            UI.bandSig = JSON.stringify(list);    // its rows already show it: no rebuild
+            BAND = i;
+            show(v);
+            renderSliders();                      // Apply shows
+            renderPEQ();
+        }
+        range.addEventListener('input', function () { set(log ? posToFreq(range.value) : range.value); });
+        // a typed value, once committed, shown as kept (held to the range and step) though the box still has the focus
+        box.addEventListener('change', function () {
+            if (box.value !== '') { set(box.value); }
+            var b = bandsOf(view() || {})[i];
+            if (b) { box.value = clampStep(b[prop], lim).toFixed(decimals(step)); }
+        });
+        if (prop === 'Gain') { range.addEventListener('dblclick', function () { set(0); }); }
+    }
+
+    // The graph, as the classic page draws it (its updatePEQGraph, with Fox's FrequencyResponsePlotter): loudness, all
+    // the bands, the band in use, and everything together; shown while loudness is on or a band is there; drawn at
+    // the card's width (Fox's plotter is 300 px at least: the drawing is scaled to fit, CSS); at most once a frame
+    var GRAPH_RAF = null;
+    function drawGraphSoon() {
+        if (GRAPH_RAF !== null) { return; }
+        GRAPH_RAF = (window.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(function () { GRAPH_RAF = null; drawGraph(); });
+    }
+    function drawGraph() {
+        if (!UI || !UI.graph) { return; }
+        var c = view() || {}, list = bandsOf(c), loud = c.Loudness || {}, loudOn = truthy(loud.enabled);
+        UI.graphBox.classList.toggle('hide', !(loudOn || list.length));
+        if (!(loudOn || list.length) || TAB !== 'peq') { return; }
+        if (typeof FrequencyResponsePlotter !== 'function' || typeof SqueezeDSPHelper !== 'function') { return; }
+        var w = UI.graphBox.clientWidth;
+        if (!w) { return; }
+        try {
+            var plotter = new FrequencyResponsePlotter(w, Math.round(Math.max(200, Math.min(320, w * 0.45))));
+            var responses = [], labels = [], data = { Client: { Filters: list } }, lr = null, pr = null;
+            if (loudOn && typeof generateLoudnessCoefficients === 'function') {
+                lr = generateLoudnessCoefficients(num(loud.listening_level, 85));
+                if (lr && lr.coefficients.length) {
+                    responses.push(plotter.calculateCombinedResponse(lr.coefficients.map(function (x) { return x.coefficients; }), 48000));
+                    labels.push('Loudness');
+                }
+            }
+            if (list.length) {
+                pr = SqueezeDSPHelper.generateFromAllFilters(data, 48000);
+                if (pr.coefficients.length) {
+                    responses.push(plotter.calculateCombinedResponse(pr.coefficients.map(function (x) { return x.coefficients; }), 48000));
+                    labels.push('All Bands');
+                    if (BAND !== null && BAND >= 0 && BAND < list.length) {
+                        try {
+                            var one = SqueezeDSPHelper.generateFromFilterIndex(data, BAND, 48000);
+                            responses.push(plotter.calculateFrequencyResponse(one.coefficients, 48000));
+                            labels.push('Band ' + (BAND + 1));
+                        } catch (e) { /* a band the maths refuses: drawn with the rest only */ }
+                    }
+                    if (lr && lr.coefficients.length) {
+                        var all = lr.coefficients.map(function (x) { return x.coefficients; }).concat(pr.coefficients.map(function (x) { return x.coefficients; }));
+                        responses.push(plotter.calculateCombinedResponse(all, 48000));
+                        labels.push('Everything');
+                    }
+                }
+            }
+            UI.graph.innerHTML = responses.length ? plotter.generateSVGPlot(responses, labels, '') : '';
+        } catch (e) {
+            UI.graph.textContent = '';
+        }
+    }
+
+    // ---------------------------------------------------------------- filter files and AutoEQ
+    function fileNote(text) { if (UI && UI.fileNote) { UI.fileNote.textContent = text || ''; } }
+
+    // A dropped or chosen file (the classic page's handleFileSelection): a .txt is REW's / AutoEQ's filter text, its
+    // bands and preamp then waiting for Apply; a .wav goes to the server's impulse folder (the FIR list)
+    function importFile(file) {
+        if (!file || !PID) { return; }
+        var ext = String(file.name).split('.').pop().toLowerCase();
+        var rd = new FileReader();
+        if (ext === 'txt') {
+            rd.onload = function () { loadEQText(String(rd.result || ''), file.name); };
+            rd.readAsText(file);
+        } else if (ext === 'wav') {
+            if (!window.confirm((L.wavAsk || 'Import the filter impulse response file:') + '\n' + file.name)) { return; }
+            rd.onload = function () { uploadWav(file.name, String(rd.result || '').split(',')[1] || '', false); };
+            rd.readAsDataURL(file);
+        } else {
+            fileNote(L.fileType || 'Only a .txt (REW) or .wav (FIR) file');
+        }
+    }
+
+    // a filter file's text (parseEQText, sqdsp_peq_lib.js): asked first with the text shown, as the classic page asks;
+    // its bands and preamp (0 when it has none) replace the player's and wait for Apply; nothing else changes (Simon
+    // 2026-11-20: the classic page's import reset every other DSP setting)
+    function loadEQText(text, name) {
+        if (typeof parseEQText !== 'function' || !client()) { return; }
+        var parsed = parseEQText(text);
+        if (!parsed.filters.length) { fileNote(fmt(L.fileNoFilters || '%s holds no filters', name)); return; }
+        if (!window.confirm((L.rewAsk || 'Load the settings:') + '\n' + text)) { return; }
+        PENDING.Filters = parsed.filters;
+        PENDING.Preamp = parsed.preamp === null ? 0 : parsed.preamp;
+        BAND = null;
+        fileNote(fmt(L.fileLoaded || '%s loaded', name));
+        renderControls();
+    }
+
+    // a WAV to the impulse folder (squeezedsp.importwav, the server's sanitised name); the FIR list then read again,
+    // and with pick, that file selected for this player once the list holds it (AutoEQ's)
+    function uploadWav(name, b64, pick) {
+        var pid = PID;
+        var file = String(name).replace(/.*[\\\/]/, '').replace(/[^\w.\-]/g, '').replace(/\.wav$/i, '') + '.wav';
+        if (file === '.wav') { file = 'audio_import.wav'; }
+        return rpc(pid, ['squeezedsp.importwav', '_p0:' + name, '_p1:' + b64], 60000).then(function (r) {
+            if (!r || num(r._success, 0) !== 1) { throw new Error('not imported'); }
+            fileNote(fmt(L.fileImported || '%s imported', file));
+            if (pick) { FIR_PICK = { pid: pid, file: file }; }
+            NEED.presets = true;
+            schedule(0);
+        }).catch(function () {
+            fileNote(fmt(L.fileFailed || '%s not imported', name));
+        });
+    }
+
+    // AutoEQ's headphone list (AutoEQIndex, sqdsp_autoeq.js), read from GitHub when the search box is first used
+    var AEQ = { timer: null, state: 'none' };
+    function aeqIndex(then) {
+        if (typeof AutoEQIndex === 'undefined') { return; }
+        if (AEQ.state === 'ready') { if (then) { then(); } return; }
+        AEQ.state = 'loading';
+        AutoEQIndex.loadIndex(function (entries) {
+            AEQ.state = entries ? 'ready' : 'none';
+            if (!entries && UI && UI.aeq) { UI.aeq.note.textContent = L.aeqIndexFailed || 'The AutoEQ list could not be read'; }
+            if (entries && then) { then(); }
+        });
+    }
+    function aeqSearchSoon() {
+        clearTimeout(AEQ.timer);
+        var q = UI.aeqInput.value.trim();
+        if (q.length < 2) { aeqShow([]); return; }
+        AEQ.timer = setTimeout(function () {
+            aeqIndex(function () { aeqShow(AutoEQIndex.search(UI.aeqInput.value.trim())); });
+        }, 250);
+    }
+    function aeqShow(list) {
+        UI.aeqList.textContent = '';
+        UI.aeqList.classList.toggle('hide', !list.length);
+        list.forEach(function (e) {
+            var b = UI.aeqList.appendChild(make('button', 'aeq-o'));
+            b.type = 'button';
+            b.appendChild(make('span', 'aeq-n', e.name));
+            b.appendChild(make('span', 'aeq-s', e.source));
+            b.addEventListener('click', function () { UI.aeqInput.value = ''; aeqShow([]); aeqPick(e); });
+        });
+    }
+    // a headphone picked: its FIR WAV first (48k, then 44.1k), loaded for this player in place of the FIR there (Simon
+    // 2026-11-20: "Loading the fir file for AUtoEQ and replacing the current one is to be expected"), and kept in the
+    // FIR folder to swap back; its ParametricEQ.txt only when it has no WAV
+    function aeqPick(e) {
+        if (typeof AutoEQIndex === 'undefined' || !AutoEQIndex.fetchBest) { return; }
+        var note = UI.aeq.note;
+        note.textContent = fmt(L.aeqFetch || 'Downloading %s', e.name);
+        AutoEQIndex.fetchBest(e).then(function (best) {
+            if (!best) { note.textContent = fmt(L.aeqNone || 'No filter found for %s', e.name); return; }
+            note.textContent = '';
+            var name = AutoEQIndex.fileName(e, best.type === 'wav' ? 'wav' : 'txt');
+            if (best.type === 'wav') {
+                if (!window.confirm((L.wavAsk || 'Import the filter impulse response file:') + '\n' + name)) { return; }
+                var rd = new FileReader();
+                rd.onload = function () { uploadWav(name, String(rd.result || '').split(',')[1] || '', true); };
+                rd.readAsDataURL(best.blob);
+            } else {
+                best.blob.text().then(function (t) { loadEQText(t, name); });
+            }
+        }, function () {
+            note.textContent = fmt(L.aeqFailed || '%s: download failed', e.name);
+        });
     }
 
     // The options are rebuilt only when the list changed: this runs after every settings read,
@@ -1284,12 +1908,34 @@
         }
     }
 
+    // Classic interface (Simon 2026-11-20: the user's choice of one interface, and a way back to classic): the choice
+    // saved on the server (squeezedsp.interface), then the classic page for this player, inside Material's skin when
+    // Material frames this page
+    var toClassicBtn = $('classic');
+    if (toClassicBtn) {
+        toClassicBtn.textContent = L.classicUi || 'Classic interface';
+        toClassicBtn.addEventListener('click', function () {
+            toClassicBtn.disabled = true;
+            rpc('', ['squeezedsp.interface', 'set:classic']).then(function () {
+                var base = '/';
+                try { if (framed && /^\/material(\/|$)/.test(window.top.location.pathname)) { base = '/material/'; } } catch (e) {}
+                window.location.replace(base + 'plugins/SqueezeDSP/index.html' + (PID ? '?player=' + encodeURIComponent(PID) : ''));
+            }, function (e) {
+                toClassicBtn.disabled = false;
+                var el = $('err');
+                if (el) { el.textContent = e.message; }
+            });
+        });
+    }
+    window.addEventListener('resize', function () { drawGraphSoon(); });
+
     tipStart();
     build();
     poll();
 
     // for the test harness only: what the page holds
     window.__sqdsp = function () {
-        return { pid: PID, players: PLAYERS, can: CAN, data: DATA, status: STATUS, presets: PRESETS, pending: PENDING, gen: GEN };
+        return { pid: PID, players: PLAYERS, can: CAN, data: DATA, status: STATUS, presets: PRESETS, pending: PENDING, gen: GEN,
+                 firs: FIRS, band: BAND };
     };
 }());

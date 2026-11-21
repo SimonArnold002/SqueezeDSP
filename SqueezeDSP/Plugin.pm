@@ -13,6 +13,13 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.58	Fork: SqueezeDSP is in each player's menu in Material again with the classic interface chosen; it
+				opens whichever interface is chosen.
+	0.1.72.57	Fork: the new page has every control the classic page has, with its help; one interface at a
+				time (classic by default; a button on each page switches). The classic page shows the processing
+				speed. REW and AutoEQ imports keep each shelf's Q and replace only the bands and the preamp;
+				AutoEQ saves its FIR in the FIR folder and selects it. A Debug log switch on both pages. Exact
+				track length is on unless a player switched it off. Buy Me a Coffee beside Fox's Ko-fi.
 	0.1.72.56	Fork: gapless tracks at different source rates play right: the last track plays out in full, then
 				the next starts (a rate change stuck the queue). At a gapless join each track keeps its own ReplayGain
 				(the last one's filter decay played at the next one's gain).
@@ -303,7 +310,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.56";
+my $revision = "0.1.72.58";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
@@ -356,7 +363,10 @@ sub initPlugin {
         'description'  => $thisapp 
     });
     $prefs = preferences('plugin.' . $thistag);
-    
+    # the interface the user prefers (Simon 2026-11-20): 'classic' (the default on install) or 'new'. Every way into
+    # SqueezeDSP's settings opens that one alone (handleWebIndex, Page.pm), so the two never run at once
+    $prefs->init({ interface => 'classic' });
+
     # Initialize directories
     my $appdata = Slim::Utils::Prefs::dir();
     $pluginDataDir = catdir($appdata, $thisapp);
@@ -417,6 +427,10 @@ sub initPlugin {
 	Slim::Control::Request::addDispatch([$thistag . '.trackgain'], [1, 1, 0, \&Plugins::SqueezeDSP::Utils::_trackGainQuery]);
     # the SqueezeDSP page's signal path and processing speed (Status.pm), polled while it is open
     Slim::Control::Request::addDispatch([$thistag . '.status'], [1, 1, 0, \&Plugins::SqueezeDSP::Status::statusQuery]);
+    # the interface the user prefers: read it, or set it with set:classic / set:new (no player needed)
+    Slim::Control::Request::addDispatch([$thistag . '.interface'], [0, 1, 1, \&interfaceCommand]);
+    # the engine's debug log, for every player: read it, or set it with set:1 / set:0 (Binary.pm, the engine's config)
+    Slim::Control::Request::addDispatch([$thistag . '.debuglog'], [0, 1, 1, \&debuglogCommand]);
 
 
 
@@ -455,6 +469,9 @@ sub initPlugin {
 # run in JavaScriptCore 2026-10-24). So 'pinned' is not registered as well: that would be a
 # second Home tile. registerCustomAction pushes and never de-dupes, so this runs once per server
 # run, and it is reached through ->can, so a server without Material simply has no entry.
+# Registered whichever interface is chosen (0.1.72.58; Simon 2026-11-20: the classic page "shows as a player setting as
+# it does now"): this address opens the one chosen, the classic page for that player inside Material (Page.pm sends it
+# there) or the new page, so a change of interface needs no new entry.
 my $materialDone;
 sub postinitPlugin {
     return if $materialDone;
@@ -529,8 +546,59 @@ sub webPages {
 }
 
 
+# the interface the user prefers (the pref interface): 'new' or, by default and for anything else, 'classic'
+sub interfaceChoice {
+    my $v = $prefs ? $prefs->get('interface') : undef;
+    return ( defined $v && $v eq 'new' ) ? 'new' : 'classic';
+}
+
+# squeezedsp.interface: the choice, and set:classic / set:new to change it (the classic page's "New interface" button,
+# the new page's "Classic interface"). Material's entry stays as it is: it opens whichever is chosen.
+sub interfaceCommand {
+    my $request = shift;
+    if ( $request->isNotQuery( [ [ $thistag . '.interface' ] ] ) ) {
+        $request->setStatusBadDispatch();
+        return;
+    }
+    my $set = $request->getParam('set');
+    if ( defined $set ) {
+        unless ( $set eq 'classic' || $set eq 'new' ) {
+            $request->setStatusBadParams();
+            return;
+        }
+        $prefs->set( 'interface', $set );
+    }
+    $request->addResult( 'interface', interfaceChoice() );
+    $request->setStatusDone();
+}
+
+# squeezedsp.debuglog: the engine's debug log (Simon 2026-11-20: a switch on the pages, where it was a hand edit of
+# Bin/SqueezeDSP_config.json), and set:1 / set:0 to change it; the engine reads it at each stream's start
+sub debuglogCommand {
+    my $request = shift;
+    if ( $request->isNotQuery( [ [ $thistag . '.debuglog' ] ] ) ) {
+        $request->setStatusBadDispatch();
+        return;
+    }
+    my $set = $request->getParam('set');
+    if ( defined $set ) {
+        unless ( $set eq '0' || $set eq '1' ) {
+            $request->setStatusBadParams();
+            return;
+        }
+        Plugins::SqueezeDSP::Binary::setDebug($set);
+    }
+    $request->addResult( 'debug', Plugins::SqueezeDSP::Binary::debugOn() );
+    $request->setStatusDone();
+}
+
+# the classic page; with the new interface chosen, a document that sends the browser to it for the same player, so
+# the classic page never runs then (Material's Extras entry, the plugin manager's Settings link, the classic skin's menu)
 sub handleWebIndex {
     my ($client, $params) = @_;
+    if ( interfaceChoice() eq 'new' ) {
+        return Plugins::SqueezeDSP::Page::moveDoc( Plugins::SqueezeDSP::Page::PATH() . ( $client ? '?player=' . Plugins::SqueezeDSP::Page::uriEsc( $client->id ) : '' ) );
+    }
     $params->{cacheBust} = $cacheBust;
     return Slim::Web::HTTP::filltemplatefile('plugins/SqueezeDSP/index.html', $params) if $client;
 }

@@ -49,6 +49,9 @@ print ( $myversion );
     </span>
     <button class="sqdsp-click minibutton button-green text-button"
         onclick="window.open('https://github.com/Foxenfurter/SqueezeDSP/wiki', '_blank');">?</button>
+    <!-- the new interface instead of this one, for good (Simon 2026-11-20: the user's choice of one; squeezedsp.interface) -->
+    <button class="sqdsp-click button button-blue" type="button" id="btn_NewInterface"
+        onclick="SqueezeDSPSwitchInterface('new');">[% "PLUGIN_SQUEEZEDSP_NEW_UI" | string %]</button>
 </span>
 </div>
 
@@ -87,6 +90,8 @@ print ( $myversion );
     <Input id="DSDOutNoDsf_Help"      readonly value='[% "PLUGIN_SQUEEZEDSP_DSD_OUT_NO_DSF"     | string %]'>
     <Input id="DSDOutNoReduced_Help"  readonly value='[% "PLUGIN_SQUEEZEDSP_DSD_OUT_NO_REDUCED" | string %]'>
     <Input id="DSDNativeOnly_Help"    readonly value='[% "PLUGIN_SQUEEZEDSP_DSD_NATIVE_ONLY"      | string %]'>
+    <Input id="Realtime_Desc"         readonly value='[% "PLUGIN_SQUEEZEDSP_LIVE_REALTIME"        | string %]'>
+    <Input id="Measuring_Desc"        readonly value='[% "PLUGIN_SQUEEZEDSP_LIVE_MEASURING"       | string %]'>
 </DIV>
 
 <!-- ============================================================
@@ -146,6 +151,19 @@ print ( $myversion );
      the clipping indicator in signal path"; on the SqueezeDSP page it is the signal path's last row)
      ============================================================ -->
 <TABLE class="table-container">
+    <!-- the processing speed (Simon 2026-11-20: "would like to see processing speed on the old one"): the new page's figure,
+         from squeezedsp.status, the figure alone (LocalStartSpeed) -->
+    <TR class="row-header" id="hdr_speed">
+        <TD class="rowTitle">
+            <span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_LIVE_SPEED" | string %]</span>
+        </TD>
+        <TD class="rowBody">
+            <span id="sqdsp-speed" class="sqdsp-speed">-</span>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
+</TABLE>
+<TABLE class="table-container">
     <TR class="row-header" id="hdr_clipping">
         <TD class="rowTitle">
             <span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_LIVE_CLIPPING" | string %]</span>
@@ -163,6 +181,26 @@ print ( $myversion );
                         else { DisplayAlert('Clear', 'Error: ' + msg, 2000); }
                     })">Clear Log</button>
         </TD>
+    </TR>
+    <!-- the engine's debug log, every player's (Simon 2026-11-20: a switch here, not a hand edit of the engine's config):
+         saved at once, outside Apply (squeezedsp.debuglog) -->
+    <TR id="control_DebugLog" class="row-header">
+        <TD class="rowTitle">
+            <div class="tooltip">
+                <label class="infoTitle">[% "PLUGIN_SQUEEZEDSP_DEBUG_LOG" | string %]</label>
+                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_DEBUG_LOG_HELP" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowBody">
+            <div class="checkbox-row">
+                <div class="checkbox-group">
+                    <input class="Check" type="checkbox" id="DebugLog" value="0"
+                           onclick="SqueezeDSPSetDebugLog(this.checked);">
+                    <label for="DebugLog" class="Toggle">Toggle</label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
     </TR>
 </TABLE>
 <!-- ============================================================
@@ -1168,6 +1206,10 @@ print ( $myversion );
      onmouseout="this.style.opacity='0.75'">
     <script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script>
     <script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#72a4f2', 'Y8Y31UOE3D'); kofiwidget2.draw();</script>
+    <!-- Simon's, beside Fox's (Simon 2026-11-20) -->
+    <a href="https://buymeacoffee.com/crystalgipsy" target="_blank" rel="noopener" class="sqdsp-bmc"
+       style="display:block; margin-top:6px; padding:6px 12px; border-radius:6px; background:#ffdd00; color:#000; font-weight:600;
+              text-align:center; text-decoration:none; font-family:inherit;">Buy me a coffee</a>
 </div>
 
 [% END %]
@@ -1210,6 +1252,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
     initAutoEQUI();
     LocalInitTabs();
+    LocalStartSpeed();
 
     var theme = logParentTheme();
     applyThemeClass(theme);

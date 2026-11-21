@@ -452,6 +452,86 @@ function setCurrentFilter(filterIndex) {
 }
 
 
+/*---------------------------------------------------
+  SqueezeDSP fork (0.1.72.57): reading a REW / AutoEQ / Equalizer APO filter file, and a shelf's Q and Slope, shared
+  by both pages (the classic page's sqdsp_file.js and the new page)
+-----------------------------------------------------*/
+
+// The band an Add gives each type (the classic page's AddPEQBand): its frequency, gain and Q or Slope
+const PEQ_BAND_DEFAULTS = {
+    peak:      { Frequency: 1000,  Gain: 0, Slope: 1.41, SlopeType: 'Q' },
+    lowshelf:  { Frequency: 300,   Gain: 3, Slope: 0.3,  SlopeType: 'slope' },
+    highshelf: { Frequency: 8000,  Gain: 3, Slope: 0.3,  SlopeType: 'slope' },
+    lowpass:   { Frequency: 20000, Gain: 0, Slope: 0.73, SlopeType: 'Q' },
+    highpass:  { Frequency: 20,    Gain: 0, Slope: 0.79, SlopeType: 'Q' }
+};
+
+// A shelf's Q as its slope S at a gain (dB), and back: the engine's shelf (foxPEQ CalcBiquadFilter, the RBJ cookbook)
+// takes either, alpha = sin(w)/(2Q) = sin(w)/2 * sqrt((A + 1/A)(1/S - 1) + 2), A = 10^(gain/40). Exact, so a band
+// switched between peak and shelf keeps its shape; held to the page's ranges (Q 0.1-20, Slope 0.05-1.2).
+function peqShelfQToSlope(Q, gainDb) {
+    const A = Math.pow(10, Math.abs(Number(gainDb) || 0) / 40);
+    const q = Math.max(0.1, Math.min(20, Number(Q) || 0.707));
+    const inv = 1 + (1 / (q * q) - 2) / (A + 1 / A);
+    const s = inv > 0 ? 1 / inv : 1.2;
+    return Math.round(Math.max(0.05, Math.min(1.2, s)) * 100) / 100;
+}
+function peqShelfSlopeToQ(S, gainDb) {
+    const A = Math.pow(10, Math.abs(Number(gainDb) || 0) / 40);
+    const s = Math.max(0.05, Math.min(1.2, Number(S) || 1));
+    const x = (A + 1 / A) * (1 / s - 1) + 2;
+    const q = x > 0 ? 1 / Math.sqrt(x) : 20;
+    return Math.round(Math.max(0.1, Math.min(20, q)) * 100) / 100;
+}
+
+// A filter file's text as { preamp, filters }: the lines "Preamp: -6.3 dB" and "Filter 1: ON PK Fc 105 Hz Gain 6.5 dB
+// Q 0.70" (REW, AutoEQ's ParametricEQ.txt; "Filter:" with no number, Equalizer APO's), read by their words, not by
+// position (the classic page read fixed positions: a line laid out otherwise was skipped or lost its frequency).
+// A shelf keeps the file's Q (the engine and the graph take Q on a shelf): the classic page turned it into Slope by a
+// straight line across the two sliders' ranges, which put AutoEQ's HD 600 bass shelf (Q 0.70) 2.4 dB off. A bandwidth
+// in octaves (BW Oct) becomes its Q. A filter that is OFF, of a type the engine has no filter for, or with no
+// frequency is left out; one with no Q or gain takes what Add gives its type. preamp: null when the file has none.
+function parseEQText(text) {
+    const TYPES = { PK: 'peak', PEQ: 'peak', LS: 'lowshelf', LSC: 'lowshelf', LSQ: 'lowshelf', HS: 'highshelf', HSC: 'highshelf',
+                    HSQ: 'highshelf', LP: 'lowpass', LPQ: 'lowpass', HP: 'highpass', HPQ: 'highpass' };
+    const out = { preamp: null, filters: [] };
+    String(text == null ? '' : text).split(/\r?\n/).forEach(function (line) {
+        const t = line.trim().split(/\s+/);
+        if (/^preamp:?$/i.test(t[0] || '')) {
+            const v = parseFloat(t[1]);
+            if (isFinite(v)) out.preamp = Math.round(v * 100) / 100;
+            return;
+        }
+        if (!/^filter/i.test(t[0] || '')) return;
+        let i = 1;
+        while (i < t.length && /^\d*:?$/.test(t[i])) i++;   // the number and its colon, either or neither
+        if (!/^on$/i.test(t[i] || '')) return;
+        const type = TYPES[(t[i + 1] || '').toUpperCase()];
+        if (!type) return;
+        const word = function (re) {
+            for (let k = i + 2; k < t.length - 1; k++) { if (re.test(t[k])) { const v = parseFloat(t[k + 1]); return isFinite(v) ? v : null; } }
+            return null;
+        };
+        let bwIdx = -1;
+        for (let k = i + 2; k < t.length; k++) { if (/^bw$/i.test(t[k])) { bwIdx = k; break; } }
+        const fc = word(/^fc$/i);
+        if (fc === null || fc <= 0) return;
+        const def = PEQ_BAND_DEFAULTS[type];
+        let q = word(/^q$/i);
+        if (q === null && bwIdx >= 0) {
+            const bw = parseFloat(/^oct/i.test(t[bwIdx + 1] || '') ? t[bwIdx + 2] : t[bwIdx + 1]);
+            if (isFinite(bw) && bw > 0) q = 1 / (2 * Math.sinh(Math.LN2 / 2 * bw));
+        }
+        const gain = word(/^gain$/i);
+        const f = { FilterType: type, Frequency: Math.round(fc), Gain: gain === null ? def.Gain : Math.round(gain * 100) / 100 };
+        if (q === null || q <= 0) { f.Slope = def.Slope; f.SlopeType = def.SlopeType; }
+        else { f.Slope = Math.round(q * 100) / 100; f.SlopeType = 'Q'; }
+        if (type === 'lowpass' || type === 'highpass') f.Gain = 0;
+        out.filters.push(f);
+    });
+    return out;
+}
+
 
 // Usage examples:
 /*

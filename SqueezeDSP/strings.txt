@@ -8,7 +8,7 @@ PLUGIN_SQUEEZEDSP_MODULEDESC
 	EN	Squeeze DSP and Room Correction
 
 PLUGIN_SQUEEZEDSP_DISPLAYNAME
-	EN	Squeeze DSP
+	EN	Squeeze DSP (Gipsy SRC Version)
 
 
 PLUGIN_SQUEEZEDSP_BANDCENTER
@@ -24,7 +24,7 @@ PLUGIN_SQUEEZEDSP_EXACTLENGTH
 	EN	Exact track length
 
 PLUGIN_SQUEEZEDSP_EXACTLENGTH_HELP
-	EN	Can help a UPnP or bridged player that gets stuck at the end of a track to progress. Leave disabled for native Slimproto/Squeezelite clients.
+	EN	Can help a UPnP or bridged player that gets stuck at the end of a track to progress.
 
 PLUGIN_SQUEEZEDSP_OUTPUT
 	EN	Output
@@ -224,20 +224,80 @@ PLUGIN_SQUEEZEDSP_DSD_ENCODER
 PLUGIN_SQUEEZEDSP_LIVE_DSP_OFF_TAB
 	EN	DSP is off for this player (DSP tab): these apply when it is on.
 
-PLUGIN_SQUEEZEDSP_LIVE_DSP_CLASSIC
-	EN	ReplayGain, delay and loudness are on the classic page for now.
+PLUGIN_SQUEEZEDSP_LIVE_RG_MODE
+	EN	Mode
 
-PLUGIN_SQUEEZEDSP_LIVE_PEQ_CLASSIC
-	EN	The equaliser, its graph and importing filters are on the classic page for now.
+PLUGIN_SQUEEZEDSP_LIVE_RG_SMART
+	EN	Smart
 
-PLUGIN_SQUEEZEDSP_LIVE_CONV_CLASSIC
-	EN	The room-correction impulse (FIR) and its strength are on the classic page for now.
+PLUGIN_SQUEEZEDSP_LIVE_RG_TRACK
+	EN	Track only
 
-PLUGIN_SQUEEZEDSP_LIVE_XFEED_CLASSIC
-	EN	Crossfeed is on the classic page for now.
+PLUGIN_SQUEEZEDSP_LIVE_RG_ALBUM
+	EN	Album only
 
-PLUGIN_SQUEEZEDSP_LIVE_OPEN_CLASSIC
-	EN	Open the classic page
+PLUGIN_SQUEEZEDSP_LIVE_RESET
+	EN	Reset
+
+PLUGIN_SQUEEZEDSP_LIVE_CLEAR_LOG
+	EN	Clear Log
+
+PLUGIN_SQUEEZEDSP_LIVE_ADD
+	EN	Add
+
+PLUGIN_SQUEEZEDSP_LIVE_BAND
+	EN	Band %s
+
+PLUGIN_SQUEEZEDSP_LIVE_REMOVE
+	EN	Remove
+
+PLUGIN_SQUEEZEDSP_LIVE_REW_ASK
+	EN	Load the settings:
+
+PLUGIN_SQUEEZEDSP_LIVE_WAV_ASK
+	EN	Import the filter impulse response file:
+
+PLUGIN_SQUEEZEDSP_LIVE_FILE_LOADED
+	EN	%s loaded
+
+PLUGIN_SQUEEZEDSP_LIVE_FILE_IMPORTED
+	EN	%s imported
+
+PLUGIN_SQUEEZEDSP_LIVE_FILE_FAILED
+	EN	%s not imported
+
+PLUGIN_SQUEEZEDSP_LIVE_FILE_TYPE
+	EN	Only a .txt (REW) or .wav (FIR) file
+
+PLUGIN_SQUEEZEDSP_LIVE_FILE_ONE
+	EN	One file at a time
+
+PLUGIN_SQUEEZEDSP_LIVE_FILE_NOFILTERS
+	EN	%s holds no filters
+
+PLUGIN_SQUEEZEDSP_LIVE_AEQ_FETCH
+	EN	Downloading %s
+
+PLUGIN_SQUEEZEDSP_LIVE_AEQ_NONE
+	EN	No filter found for %s
+
+PLUGIN_SQUEEZEDSP_LIVE_AEQ_FAILED
+	EN	%s: download failed
+
+PLUGIN_SQUEEZEDSP_LIVE_AEQ_INDEX_FAILED
+	EN	The AutoEQ list could not be read
+
+PLUGIN_SQUEEZEDSP_LIVE_CLASSIC_UI
+	EN	Classic interface
+
+PLUGIN_SQUEEZEDSP_NEW_UI
+	EN	New interface
+
+PLUGIN_SQUEEZEDSP_DEBUG_LOG
+	EN	Debug log
+
+PLUGIN_SQUEEZEDSP_DEBUG_LOG_HELP
+	EN	Debug lines from the engine in squeezedsp.log, for every player, from the next track on.
 
 PLUGIN_SQUEEZEDSP_LIVE_CLIPPING
 	EN	Clipping
@@ -601,9 +661,6 @@ PLUGIN_SQUEEZEDSP_LIVE_STAGES
 
 PLUGIN_SQUEEZEDSP_LIVE_FLOAT
 	EN	float
-
-PLUGIN_SQUEEZEDSP_LIVE_MORE
-	EN	Equaliser, filters, loudness and the rest are on the full settings page.
 
 PLUGIN_SQUEEZEDSP_LIVE_BACK
 	EN	Back

@@ -363,19 +363,19 @@ function handleFilterTypeChange(radio, bandIndex) {
     const wasShelf = previousFilterType.includes('shelf');
     const isShelf = newFilterType.includes('shelf');
     
+    // SqueezeDSP fork (0.1.72.57): a band moved between peak and shelf converts its Q and its Slope exactly, at its gain
+    // (peqShelfQToSlope / peqShelfSlopeToQ, sqdsp_peq_lib.js); Fox's qToSlope / slopeToQ is a straight line between
+    // the two sliders' ranges, which changed the band's shape. A shelf holding a Q (a file's) keeps it.
     if (wasShelf != isShelf) {
         if (isShelf) {
             if (filter.SlopeType === 'Q') {
                 filter.SlopeType = 'slope';
-                filter.Slope = qToSlope(filter.Slope) || 0.05;
-            } else {
-                filter.SlopeType = 'Q';
-                filter.Slope = slopeToQ(filter.Slope) || 0.1;
+                filter.Slope = peqShelfQToSlope(filter.Slope, filter.Gain);
             }
         } else {
             if (filter.SlopeType === 'slope') {
                 filter.SlopeType = 'Q';
-                filter.Slope = slopeToQ(filter.Slope) || 0.1;
+                filter.Slope = peqShelfSlopeToQ(filter.Slope, filter.Gain);
             } else {
                 filter.Slope = filter.Slope || 1.41;
             }

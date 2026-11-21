@@ -2,52 +2,14 @@
 File Import and Processing
 -----------------------------------------------------*/
 
+// A REW / AutoEQ filter file: its bands and preamp replace the player's, waiting for Apply. SqueezeDSP fork (0.1.72.57,
+// Simon 2026-11-20): read by parseEQText (sqdsp_peq_lib.js, shared with the new page), so a shelf keeps its own Q, and
+// the other DSP settings (FIR, crossfeed, loudness, ReplayGain, delay, balance, width) stay: Fox's import reset them all
+// first (LocalClearSettings). A file with no Preamp line sets the preamp to 0, as that reset did.
 function ProcessREW(EQText) {
-    LocalClearSettings();
-    EQRecords = EQText.split(/\r?\n/);;
-    
-    for (var i = 0; i < EQRecords.length; i++) {
-        if (EQRecords[i].startsWith('Preamp')) {
-            var PreampSettings = EQRecords[i].split(/(\s+)/).filter(function(e) { return e.trim().length > 0; });
-            Gain = Math.round(PreampSettings[1] * 100) / 100;
-            SqueezeDSPData.Client.Preamp = Gain;
-        }
-        
-        if (EQRecords[i].startsWith('Filter')) {
-            var EQSettings = EQRecords[i].split(/(\s+)/).filter(function(e) { return e.trim().length > 0; });
-            var FilterType = '';
-            var SlopeType = 'Q';
-            
-            if (EQSettings[2] == 'ON') {
-                rewFilterType = EQSettings[3];
-                switch (rewFilterType) {
-                    case 'PK': FilterType = 'peak'; break;
-                    case 'LS': case 'LSC': FilterType = 'lowshelf'; break;
-                    case 'HS': case 'HSC': FilterType = 'highshelf'; break;
-                    case 'LP': FilterType = 'lowpass'; break;
-                    case 'HP': FilterType = 'highpass'; break;
-                    default: FilterType = 'peak'; break;
-                }
-                
-                if (FilterType.includes('shelf')) SlopeType = 'slope';
-                
-                Freq = Math.round(EQSettings[5]);
-                Gain = Math.round(EQSettings[8] * 100) / 100;
-                Slope = Math.round(EQSettings[11] * 100) / 100;
-                
-                if (SlopeType == 'slope') Slope = Math.round(qToSlope(Slope) * 100) / 100;
-                
-                SqueezeDSPData.Client.Filters.push({
-                    FilterType: FilterType,
-                    Frequency: Freq,
-                    Gain: Gain,
-                    SlopeType: SlopeType,
-                    Slope: Slope
-                });
-            }
-        }
-    }
-    
+    var parsed = parseEQText(EQText);
+    SqueezeDSPData.Client.Filters = parsed.filters;
+    SqueezeDSPData.Client.Preamp = parsed.preamp === null ? 0 : parsed.preamp;
     LocalUpdateSettings();
     reStyleElement('btn_Apply', 'button-blue', 'button-amber');
 }

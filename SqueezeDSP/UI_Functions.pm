@@ -448,6 +448,8 @@ sub readClientSettings {
     # with a button that turns it off through LMS's own `pref` command; the plugin never changes it by itself (ledger
     # THE PLUGIN DOES NOT SET prioritizeNative)
     $request->addResult('prefer_native', Slim::Utils::Prefs::preferences('server')->get('prioritizeNative') ? 1 : 0);
+    # the engine's debug log (every player's; squeezedsp.debuglog switches it), so both pages show its switch
+    $request->addResult('debug_log', Plugins::SqueezeDSP::Binary::debugOn());
 
     if (open(my $fh, '<', $myJSONFile)) {
         local $/;

@@ -1605,3 +1605,7 @@ tr.sqdsp-overridden > td.rowTitle, tr.sqdsp-overridden > td.rowBody { opacity: 0
 .filter-group .filter-type:has(input[type="radio"]:disabled:not(:checked)):hover {
   background: lightsteelblue; color: black; border-color: RoyalBlue; transform: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
+
+/* the processing speed (SqueezeDSP fork 0.1.72.57): the new page's figure */
+.sqdsp-speed { font-weight: 600; font-variant-numeric: tabular-nums; }
+.sqdsp-speed.none { font-weight: 400; opacity: 0.6; }

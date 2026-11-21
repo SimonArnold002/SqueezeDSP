@@ -29,7 +29,9 @@ function parseLine(line) {
     const name    = m[1].trim();
     const relPath = m[2].trim();
     const parts   = relPath.split('/');
-    const source  = parts.slice(0, -1).join(' / ');
+    // SqueezeDSP fork (0.1.72.57): the source shown as written ("GRAS 43AG-7"), not URL-encoded ("GRAS%2043AG-7")
+    const dec     = function (t) { try { return decodeURIComponent(t); } catch (e) { return t; } };
+    const source  = parts.slice(0, -1).map(dec).join(' / ');
 
     return { name, path: relPath, source };
 }
@@ -60,7 +62,10 @@ function parseLine(line) {
             .catch(err => {
                 console.error('AutoEQ: failed to load index:', err);
                 indexLoading = false;
+                // SqueezeDSP fork (0.1.72.57): each waiting caller told (null), so a page can say the list was not read
+                const waiting = pendingCallbacks;
                 pendingCallbacks = [];
+                waiting.forEach(cb => cb(null));
             });
     }
 
@@ -148,8 +153,52 @@ function parseLine(line) {
 			})
 			.catch(err => logFn('Failed to download ' + displayName + ': ' + err.message));
 	}
+    /*
+     * SqueezeDSP fork (0.1.72.57): a headphone's folder is named for it and so are its files (AutoEQ's results, read
+     * 2026-11-20: "<name> minimum phase 48000Hz.wav", "... 44100Hz.wav", "<name> ParametricEQ.txt"), so they are
+     * fetched straight from raw.githubusercontent.com in selectBestFile's order, with no api.github.com call (60 an
+     * hour per address, unauthenticated); only when none of them is there is the folder listed through the API, as
+     * before. Resolves with { type: 'wav' | 'peq', blob } or null (nothing usable), rejects on a failed download.
+     */
+    function fetchBest(entry) {
+        const dec   = function (t) { try { return decodeURIComponent(t); } catch (e) { return t; } };
+        const parts = String(entry.path).split('/').map(dec);
+        const dir   = RAW_BASE + parts.map(encodeURIComponent).join('/') + '/';
+        const head  = parts[parts.length - 1];
+        const tries = [[head + ' minimum phase 48000Hz.wav', 'wav'], [head + ' minimum phase 44100Hz.wav', 'wav'],
+                       [head + ' ParametricEQ.txt', 'peq']];
+        let i = 0;
+        function viaApi() {
+            return new Promise(function (resolve, reject) {
+                listFiles(entry.path, function (files, err) {
+                    if (err || !files) { reject(err || new Error('no file list')); return; }
+                    const best = selectBestFile(files);
+                    if (!best) { resolve(null); return; }
+                    fetch(best.fileObj.download_url)
+                        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+                        .then(blob => resolve({ type: best.type, blob: blob }), reject);
+                });
+            });
+        }
+        function next() {
+            if (i >= tries.length) return viaApi();
+            const t = tries[i++];
+            return fetch(dir + encodeURIComponent(t[0])).then(function (r) {
+                if (r.status === 404) return next();
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.blob().then(blob => ({ type: t[1], blob: blob }));
+            });
+        }
+        return next();
+    }
+
+    /* the name an import is saved under: the headphone and its source, as Fox's handleAutoEQSelection names it */
+    function fileName(entry, ext) {
+        return (entry.name + '_' + entry.source).replace(/[^a-zA-Z0-9_\-]/g, '_').replace(/_+/g, '_').substring(0, 80) + '.' + ext;
+    }
+
     /* Public API */
-    return { loadIndex, search, listFiles, selectBestFile, importFile };
+    return { loadIndex, search, listFiles, selectBestFile, importFile, fetchBest, fileName };
 })();
 
 
@@ -166,10 +215,13 @@ function initAutoEQUI() {
 
     let debounceTimer = null;
 
-    /* Kick off index pre-fetch immediately so it's warm by first keystroke */
-    AutoEQIndex.loadIndex(function() {
-        if (statusSpan) statusSpan.textContent = '';
-    });
+    /* SqueezeDSP fork (0.1.72.57): the index (about 850 KB from GitHub) read when the search box is first used, not at
+       every opening of the page */
+    input.addEventListener('focus', function () {
+        AutoEQIndex.loadIndex(function() {
+            if (statusSpan) statusSpan.textContent = '';
+        });
+    }, { once: true });
 
     input.addEventListener('input', function () {
         clearTimeout(debounceTimer);
@@ -263,38 +315,34 @@ function hideDropdown(dropdown) {
     if (dropdown) dropdown.style.display = 'none';
 }
 
+// SqueezeDSP fork (0.1.72.57): the files fetched by name (AutoEQIndex.fetchBest, no GitHub API call unless they are
+// not there); a FIR WAV is imported and then selected for the player (Simon 2026-11-20: loading it in place of the FIR
+// there "is to be expected"), waiting for Apply as every change on this page does; a ParametricEQ.txt goes through the
+// file import (ConfirmREW)
 function handleAutoEQSelection(entry, statusSpan) {
     const log = function (msg) {
         if (statusSpan) statusSpan.textContent = msg;
         if (typeof outputlist === 'function') outputlist(msg);
     };
-
-    log('Looking up files for: ' + entry.name + ' (' + entry.source + ')');
-
-    AutoEQIndex.listFiles(entry.path, function (files, err) {
-        if (err || !files) {
-            log('Could not retrieve file list: ' + (err ? err.message : 'unknown error'));
-            return;
+    log('Downloading: ' + entry.name);
+    AutoEQIndex.fetchBest(entry).then(function (best) {
+        if (!best) { log('No compatible file found for: ' + entry.name); return; }
+        const name = AutoEQIndex.fileName(entry, best.type === 'wav' ? 'wav' : 'txt');
+        if (best.type === 'wav') {
+            const file = new File([best.blob], name, { type: 'audio/wav' });
+            importWavFile(file, log, function () {
+                SqueezeDSPGetList(function (data) {
+                    LocalBuildList('FIRWavFile', data);
+                    const sel = document.getElementById('sel_FIRWavFile');
+                    if (!sel) return;
+                    highlightMatchingOption('sel_FIRWavFile', name);
+                    NewFieldValue('FIRWavFile', sel, false);
+                });
+            });
+        } else {
+            readFile(new File([best.blob], name, { type: 'text/plain' }), ConfirmREW);
         }
-
-        const best = AutoEQIndex.selectBestFile(files);
-
-        if (!best) {
-            log('No compatible file found for: ' + entry.name);
-            return;
-        }
-
-        const typeLabel = (best.type === 'wav') ? 'FIR WAV' : 'Parametric EQ';
-        log('Found ' + typeLabel + ': ' + best.fileObj.name);
-
-        // build a descriptive name: HeadphoneName_Source.ext
-        const ext         = best.fileObj.name.split('.').pop();
-        const safeName    = (entry.name + '_' + entry.source)
-                                .replace(/[^a-zA-Z0-9_\-]/g, '_')
-                                .replace(/_+/g, '_')
-                                .substring(0, 80);
-        const customName  = safeName + '.' + ext;
-
-        AutoEQIndex.importFile(best.fileObj, best.type, log, customName);
+    }, function (err) {
+        log('Failed to download ' + entry.name + ': ' + (err && err.message ? err.message : err));
     });
 }

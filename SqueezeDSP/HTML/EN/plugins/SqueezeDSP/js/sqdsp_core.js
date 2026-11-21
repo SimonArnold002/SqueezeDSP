@@ -64,7 +64,7 @@ function LocalUpdateSettings() {
     LocalDisplayVals();    
     
     myRadio = LocalSetupToggle('DSP', SqueezeDSPData.Client.Bypass, true);
-    LocalSetupToggle('ExactLength', String(replaceNull(SqueezeDSPData.Client.ExactLength, 0)) === '1' ? 1 : 0);
+    LocalSetupToggle('ExactLength', String(SqueezeDSPData.Client.ExactLength) === '1' ? 1 : 0);
     LocalSetupAll();
 
     myRadio = LocalSetupToggle('Loudness', replaceNull(SqueezeDSPData.Client.Loudness.enabled,0));
@@ -75,6 +75,9 @@ function LocalUpdateSettings() {
     reStyleElement('btn_Apply', 'button-amber', 'button-blue');
     ListenForSlide();
 	GetLogSummary();
+    // the engine's debug log (every player's), as the server holds it
+    const debugBox = document.getElementById('DebugLog');
+    if (debugBox && SqueezeDSPPlayer) debugBox.checked = !!SqueezeDSPPlayer.debugLog;
 }
 
 function LocalDisplayVals() {
@@ -953,3 +956,90 @@ function openPresetMenu(anchorEl) {
     // Expose for the HTML onclick
     window.openPresetMenu = openPresetMenu;
 })();
+
+
+/*---------------------------------------------------
+SqueezeDSP fork (0.1.72.57, Simon 2026-11-20): the processing speed, the choice of interface and the engine's debug log
+-----------------------------------------------------*/
+
+// one JSON-RPC request with a time limit (the new page's way); done(result or null)
+function SqueezeDSPRpc(player, cmd, done) {
+    const x = new XMLHttpRequest();
+    x.open('POST', '/jsonrpc.js', true);
+    x.setRequestHeader('Content-Type', 'application/json');
+    x.timeout = 8000;
+    x.onload = function () {
+        let r = null;
+        try { r = JSON.parse(x.responseText); } catch (e) { r = null; }
+        done(r && !r.error && r.result ? r.result : null);
+    };
+    x.onerror = x.ontimeout = function () { done(null); };
+    x.send(JSON.stringify({ id: 1, method: 'slim.request', params: [player || '', cmd] }));
+}
+
+// The processing speed (Simon: "would like to see processing speed on the old one"): the new page's headline figure,
+// read as it reads it (squeezedsp.status: the engine's own figure, a finished track's kept), the figure alone; one
+// request at a time, a 2 s gap after each, never a second one while one is out
+let _speedTimer = null;
+function LocalStartSpeed() {
+    if (_speedTimer !== null) return;
+    _speedTimer = 0;
+    const turn = function () {
+        SqueezeDSPRpc(getCurrentPlayer(), ['squeezedsp.status'], function (r) {
+            LocalShowSpeed(r ? r.status : null);
+            _speedTimer = setTimeout(turn, 2000);
+        });
+    };
+    turn();
+}
+function LocalShowSpeed(st) {
+    const el = document.getElementById('sqdsp-speed');
+    if (!el) return;
+    const p = (st && st.pipeline) || {};
+    const real = !!(st && (p.running || p.finished)) && p.realtime !== undefined && p.realtime !== null;
+    if (real) {
+        const n = Number(p.realtime) || 0;
+        el.textContent = (helpText('Realtime_Desc') || '%sx realtime').replace('%s', n >= 100 ? String(Math.round(n)) : n.toFixed(1));
+        el.className = 'sqdsp-speed';
+    } else if (st && p.running) {
+        el.textContent = helpText('Measuring_Desc') || 'Measuring...';
+        el.className = 'sqdsp-speed none';
+    } else {
+        el.textContent = '-';
+        el.className = 'sqdsp-speed none';
+    }
+}
+
+// The new interface instead of this page (the user's choice of one, kept on the server: squeezedsp.interface), then
+// the new page for this player. Changes not applied yet: asked first, as leaving the page asks.
+function SqueezeDSPSwitchInterface(to) {
+    const apply = document.getElementById('btn_Apply');
+    if (apply && apply.classList.contains('button-amber') &&
+        !confirm('You have unsaved changes. Press OK to leave without them and Cancel to go back.')) return;
+    const btn = document.getElementById('btn_NewInterface');
+    if (btn) btn.disabled = true;
+    SqueezeDSPRpc('', ['squeezedsp.interface', 'set:' + to], function (r) {
+        if (!r) {
+            if (btn) btn.disabled = false;
+            DisplayAlert('Interface', 'Not changed', 2000);
+            return;
+        }
+        if (typeof handleUnsavedChanges === 'function') window.removeEventListener('beforeunload', handleUnsavedChanges);
+        const player = getCurrentPlayer();
+        window.location.replace('/squeezedsp' + (player ? '?player=' + encodeURIComponent(player) : ''));
+    });
+}
+
+// The engine's debug log, on or off for every player (squeezedsp.debuglog): saved at once, outside Apply
+function SqueezeDSPSetDebugLog(on) {
+    const box = document.getElementById('DebugLog');
+    SqueezeDSPRpc('', ['squeezedsp.debuglog', 'set:' + (on ? 1 : 0)], function (r) {
+        if (!r) {
+            if (box) box.checked = !on;
+            DisplayAlert('Debug log', 'Not saved', 2000);
+            return;
+        }
+        if (box) box.checked = Number(r.debug) === 1;
+        DisplayAlert('Debug log', 'Saved', 2000);
+    });
+}

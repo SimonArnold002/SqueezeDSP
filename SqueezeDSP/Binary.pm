@@ -2,6 +2,8 @@ package Plugins::SqueezeDSP::Binary;
 use strict;
 # (SqueezeDSP fork, 0.1.72.46) the engine's path as setup_binary finds it (Page.pm's /squeezedsp/bench runs it)
 our $ENGINE;
+# (0.1.72.57) the engine's own config, Bin/SqueezeDSP_config.json, where it reads "debug" at each run
+our $APPCONFIG;
 use File::Copy;
 use File::Spec::Functions qw(:ALL);
 use Slim::Utils::Network;
@@ -75,6 +77,14 @@ sub setup_binary {
         housekeeping();
     }
     my $appConfig = catdir(Slim::Utils::PluginManager->allPlugins->{$Plugins::SqueezeDSP::Plugin::thisapp}->{'basedir'}, 'Bin', "/", 'SqueezeDSP_config.json');
+    $APPCONFIG = $appConfig;
+    # the engine's debug log (Simon 2026-11-20: a switch on the pages, not a hand edit of this file): the plugin's pref
+    # debug, written here at each start, so a plugin update (a new Bin folder, this file with it) keeps it; the first
+    # start with the pref takes what the file holds, so a debug set by hand stays on
+    my $was = Plugins::SqueezeDSP::Utils::LoadJSONFile($appConfig);
+    my $fileDebug = ( ref $was eq 'HASH' && ref $was->{settings} eq 'HASH' && lc( $was->{settings}{debug} // '' ) eq 'true' ) ? 1 : 0;
+    preferences('plugin.squeezedsp')->init({ debug => $fileDebug });
+    amendPluginConfig($appConfig, 'debug', debugOn() ? 'true' : 'false');
     amendPluginConfig($appConfig, 'pluginDataFolder', $Plugins::SqueezeDSP::Plugin::pluginDataDir);
     amendPluginConfig($appConfig, 'settingsDataFolder', $Plugins::SqueezeDSP::Plugin::pluginSettingsDataDir);
     amendPluginConfig($appConfig, 'impulseDataFolder', $Plugins::SqueezeDSP::Plugin::pluginImpulsesDataDir);
@@ -111,6 +121,19 @@ sub housekeeping {
     unlink glob catdir($Plugins::SqueezeDSP::Plugin::pluginTempDataDir, "/", '*.wav');
 	unlink glob catdir($Plugins::SqueezeDSP::Plugin::pluginTempDataDir, "/", '*.gob');
     unlink grep { !/\current.json/ } glob catdir($Plugins::SqueezeDSP::Plugin::pluginTempDataDir, "/", '*.json');
+}
+
+# the engine's debug log, as the plugin's pref holds it (1 on), and its switch: the pref and the engine's config both,
+# so the next stream the engine starts (any player) logs at that level
+sub debugOn {
+    return preferences('plugin.squeezedsp')->get('debug') ? 1 : 0;
+}
+
+sub setDebug {
+    my $on = shift() ? 1 : 0;
+    preferences('plugin.squeezedsp')->set( 'debug', $on );
+    amendPluginConfig( $APPCONFIG, 'debug', $on ? 'true' : 'false' ) if defined $APPCONFIG;
+    return $on;
 }
 
 sub amendPluginConfig {

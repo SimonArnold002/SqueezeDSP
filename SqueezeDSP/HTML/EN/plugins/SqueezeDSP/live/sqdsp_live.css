@@ -107,13 +107,18 @@ html.lt .seg button[aria-checked="true"] { color: #fff; }
    never in the pointer's way */
 .tipbox { position: fixed; z-index: 1000; display: none; left: 0; top: 0; max-width: min(340px, calc(100vw - 16px));
           padding: 6px 10px; border-radius: 4px; background: rgba(97,97,97,0.95); color: #fff;
-          font-size: 13px; line-height: 1.4; white-space: normal; pointer-events: none;
+          font-size: 13px; line-height: 1.4; white-space: pre-line; pointer-events: none;
           box-shadow: 0 2px 6px rgba(0,0,0,0.35); }
 .tipbox.on { display: block; }
 
 .range { flex: 1 1 180px; min-width: 120px; accent-color: var(--accent); }
-.val { flex: 0 0 auto; min-width: 4.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--dim); }
-.val.pending { color: var(--accent); }
+.val { flex: 0 0 auto; min-width: 4.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--dim);
+       display: inline-flex; align-items: center; gap: 4px; justify-content: flex-end; }
+/* a value's number box (the classic page's beside each slider): typed, it waits for Apply as the slider does */
+.val .num { width: 5.6em; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line);
+            border-radius: 4px; padding: 3px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.val.pending .num { color: var(--accent); border-color: var(--accent); }
+.val .unit { color: var(--dim); }
 
 .btn { padding: 6px 14px; border: 1px solid var(--line); border-radius: 4px; background: transparent;
        color: var(--accent); font: inherit; font-size: 0.92em; cursor: pointer; }
@@ -125,6 +130,14 @@ html.lt .seg button[aria-checked="true"] { color: #fff; }
 .nativebar-t { flex: 1 1 220px; }
 .nativebar .btn { color: #fff; border-color: #fff; font-weight: 600; }
 .applyrow { display: flex; justify-content: flex-end; padding-top: 10px; }
+/* Reset and Apply under the DSP switches, on every tab */
+.dspacts { display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.dspacts .applyrow { margin-left: auto; padding-top: 0; }
+.btn.danger { color: var(--bad); border-color: var(--bad); }
+.btn.small { padding: 2px 10px; font-size: 0.84em; }
+.row .btn.small { flex: 0 0 auto; align-self: center; margin-left: auto; }
+/* a setting's options shown while it is on (ReplayGain's, loudness's level) */
+.opts .ctl:first-child { border-top: 1px solid var(--line); }
 
 select, input[type="text"] { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line);
                              border-radius: 4px; padding: 5px 8px; min-width: 0; }
@@ -132,8 +145,12 @@ select, input[type="text"] { font: inherit; color: var(--fg); background: var(--
 .c select.filter { flex: 1 1 220px; max-width: 100%; }
 .presets .c input { flex: 1 1 140px; }
 
-.more { color: var(--dim); font-size: 0.9em; padding: 4px 2px 12px; }
-.more a { color: var(--accent); }
+/* support links at the foot: Fox's Ko-fi, Simon's Buy Me a Coffee */
+.support { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; padding: 4px 2px 12px; }
+.support .btn { text-decoration: none; }
+#classic { padding: 5px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--card); color: var(--accent);
+           font: inherit; font-size: 0.92em; cursor: pointer; margin-left: auto; }
+#classic + #back { margin-left: 0; }
 
 /* a phone: a label over its control, except a switch, which stays beside its label; the
    signal path keeps its two columns, narrower */
@@ -176,3 +193,29 @@ html.lt .pk.bitlow { background: rgba(0,0,0,0.4); }
 html.lt .pk.low { background: rgba(0,0,0,0.22); }
 .pkhist { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; }
 .pkhist .pk { width: 8px; height: 8px; }
+
+/* the equaliser: its graph (Fox's plotter draws at 300 px or more; scaled to the card's width), the bands, a filter
+   file's drop area, AutoEQ's results */
+.graph { margin: 0 0 10px; border-radius: 6px; overflow: hidden; }
+.graph svg { display: block; width: 100%; height: auto; }
+.bands { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 4px; }
+.band { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+.band-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.band-n { font-weight: 600; min-width: 4.5em; }
+.band .x { margin-left: auto; padding: 2px 10px; color: var(--bad); border-color: var(--line); }
+.band .ctl:first-of-type { border-top: 1px solid var(--line); }
+.drop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; padding: 14px; margin: 6px 0;
+        border: 1px dashed var(--line); border-radius: 6px; color: var(--dim); font-size: 0.9em; text-align: center; }
+.drop.over { border-color: var(--accent); color: var(--accent); }
+.c input.aeq { flex: 1 1 220px; }
+.aeqlist { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; border: 1px solid var(--line);
+           border-radius: 6px; margin: 0 0 8px; }
+.aeq-o { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; text-align: left; padding: 6px 10px;
+         border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+.aeq-o:last-child { border-bottom: 0; }
+.aeq-o:hover, .aeq-o:focus-visible { background: var(--line); }
+.aeq-s { color: var(--dim); font-size: 0.86em; }
+@media (max-width: 560px) {
+  .band .ctl > .k { flex-basis: 100%; }
+  .val .num { width: 5em; }
+}

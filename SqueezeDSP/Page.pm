@@ -1,7 +1,9 @@
 package Plugins::SqueezeDSP::Page;
 # The SqueezeDSP page (docs/fork-plan.md, round 2): one player's signal path, its processing
-# speed, and the controls that decide how it is fed (DSP, output, Upsample, preamp, balance,
-# width, presets). The equaliser, filters and the rest stay on the classic page, linked from here.
+# speed, and every setting the classic page has (since 0.1.72.57, Simon 2026-11-20: "interface
+# parity"). The user picks one interface (the plugin's pref interface, 'classic' by default): with
+# the classic one chosen this address sends the browser to the classic page, and the classic
+# page's address sends it here with the new one chosen (Plugin.pm handleWebIndex, moveDoc below).
 #
 # A RAW HANDLER, so the bytes below are the whole document: no template and no skin. The classic
 # page is a template inside the classic skin's settings shell, which Material then frames, and
@@ -108,11 +110,74 @@ my %LABELS = (
     dspOffTab   => 'PLUGIN_SQUEEZEDSP_LIVE_DSP_OFF_TAB',
     preferNative    => 'PLUGIN_SQUEEZEDSP_PREFER_NATIVE',
     preferNativeOff => 'PLUGIN_SQUEEZEDSP_PREFER_NATIVE_OFF',
-    dspClassic  => 'PLUGIN_SQUEEZEDSP_LIVE_DSP_CLASSIC',
-    peqClassic  => 'PLUGIN_SQUEEZEDSP_LIVE_PEQ_CLASSIC',
-    convClassic => 'PLUGIN_SQUEEZEDSP_LIVE_CONV_CLASSIC',
-    xfeedClassic => 'PLUGIN_SQUEEZEDSP_LIVE_XFEED_CLASSIC',
-    openClassic => 'PLUGIN_SQUEEZEDSP_LIVE_OPEN_CLASSIC',
+    classicUi   => 'PLUGIN_SQUEEZEDSP_LIVE_CLASSIC_UI',
+    # the controls that were on the classic page alone until 0.1.72.57 (Simon 2026-11-20: "interface parity"), with
+    # the classic page's own labels and help
+    presetHelp  => 'PLUGIN_SQUEEZEDSP_PRESET_HELP',
+    reset       => 'PLUGIN_SQUEEZEDSP_LIVE_RESET',
+    clearLog    => 'PLUGIN_SQUEEZEDSP_LIVE_CLEAR_LOG',
+    debugLog    => 'PLUGIN_SQUEEZEDSP_DEBUG_LOG',
+    debugLogHelp => 'PLUGIN_SQUEEZEDSP_DEBUG_LOG_HELP',
+    replayGain  => 'PLUGIN_SQUEEZEDSP_REPLAYGAIN',
+    replayGainHelp => 'PLUGIN_SQUEEZEDSP_REPLAYGAIN_HELP',
+    rgMode      => 'PLUGIN_SQUEEZEDSP_LIVE_RG_MODE',
+    rgSmart     => 'PLUGIN_SQUEEZEDSP_LIVE_RG_SMART',
+    rgTrack     => 'PLUGIN_SQUEEZEDSP_LIVE_RG_TRACK',
+    rgAlbum     => 'PLUGIN_SQUEEZEDSP_LIVE_RG_ALBUM',
+    rgFixed     => 'PLUGIN_SQUEEZEDSP_REPLAYGAIN_FIXED',
+    spotifyGain => 'PLUGIN_SQUEEZEDSP_SPOTIFY_GAIN',
+    spotifyGainHelp => 'PLUGIN_SQUEEZEDSP_SPOTIFY_GAIN_HELP',
+    delay       => 'PLUGIN_SQUEEZEDSP_DELAY',
+    delayHelp   => 'PLUGIN_SQUEEZEDSP_DELAY_HELP',
+    loudness    => 'PLUGIN_SQUEEZEDSP_LOUDNESS',
+    loudnessHelp => 'PLUGIN_SQUEEZEDSP_LOUDNESS_HELP',
+    loudLevel   => 'PLUGIN_SQUEEZEDSP_LOUDLEVEL',
+    loudLevelHelp => 'PLUGIN_SQUEEZEDSP_LOUDLEVEL_HELP',
+    peqBands    => 'PLUGIN_SQUEEZEDSP_EQUALIZER',
+    peqHelp     => 'PLUGIN_SQUEEZEDSP_EQUALIZER_HELP',
+    add         => 'PLUGIN_SQUEEZEDSP_LIVE_ADD',
+    band        => 'PLUGIN_SQUEEZEDSP_LIVE_BAND',
+    remove      => 'PLUGIN_SQUEEZEDSP_LIVE_REMOVE',
+    freq        => 'PLUGIN_SQUEEZEDSP_FREQ',
+    gain        => 'PLUGIN_SQUEEZEDSP_GAIN',
+    qHelp       => 'PLUGIN_SQUEEZEDSP_Q_HELP',
+    slopeHelp   => 'PLUGIN_SQUEEZEDSP_SLOPE_HELP',
+    peak        => 'PLUGIN_SQUEEZEDSP_PEAK',
+    peakHelp    => 'PLUGIN_SQUEEZEDSP_PEAK_HELP',
+    lowShelf    => 'PLUGIN_SQUEEZEDSP_LOWSHELF',
+    lowShelfHelp => 'PLUGIN_SQUEEZEDSP_LOWSHELF_HELP',
+    highShelf   => 'PLUGIN_SQUEEZEDSP_HIGHSHELF',
+    highShelfHelp => 'PLUGIN_SQUEEZEDSP_HIGHSHELF_HELP',
+    lowPass     => 'PLUGIN_SQUEEZEDSP_LOWPASS',
+    lowPassHelp => 'PLUGIN_SQUEEZEDSP_LOWPASS_HELP',
+    highPass    => 'PLUGIN_SQUEEZEDSP_HIGHPASS',
+    highPassHelp => 'PLUGIN_SQUEEZEDSP_HIGHPASS_HELP',
+    importFilters => 'PLUGIN_SQUEEZEDSP_IMPORTFILTERS',
+    dropZone    => 'PLUGIN_SQUEEZEDSP_DROPZONE',
+    chooseFile  => 'PLUGIN_SQUEEZEDSP_CHOOSEFILE',
+    rewAsk      => 'PLUGIN_SQUEEZEDSP_LIVE_REW_ASK',
+    wavAsk      => 'PLUGIN_SQUEEZEDSP_LIVE_WAV_ASK',
+    fileLoaded  => 'PLUGIN_SQUEEZEDSP_LIVE_FILE_LOADED',
+    fileImported => 'PLUGIN_SQUEEZEDSP_LIVE_FILE_IMPORTED',
+    fileFailed  => 'PLUGIN_SQUEEZEDSP_LIVE_FILE_FAILED',
+    fileType    => 'PLUGIN_SQUEEZEDSP_LIVE_FILE_TYPE',
+    fileOne     => 'PLUGIN_SQUEEZEDSP_LIVE_FILE_ONE',
+    fileNoFilters => 'PLUGIN_SQUEEZEDSP_LIVE_FILE_NOFILTERS',
+    headphoneEq => 'PLUGIN_SQUEEZEDSP_HEADPHONEEQ',
+    headphoneEqExp => 'PLUGIN_SQUEEZEDSP_HEADPHONEEQ_EXPERIMENTAL',
+    headphoneEqHelp => 'PLUGIN_SQUEEZEDSP_HEADPHONEEQ_HELP',
+    headphoneEqFind => 'PLUGIN_SQUEEZEDSP_HEADPHONEEQ_PLACEHOLDER',
+    aeqFetch    => 'PLUGIN_SQUEEZEDSP_LIVE_AEQ_FETCH',
+    aeqNone     => 'PLUGIN_SQUEEZEDSP_LIVE_AEQ_NONE',
+    aeqFailed   => 'PLUGIN_SQUEEZEDSP_LIVE_AEQ_FAILED',
+    aeqIndexFailed => 'PLUGIN_SQUEEZEDSP_LIVE_AEQ_INDEX_FAILED',
+    firFile     => 'PLUGIN_SQUEEZEDSP_ROOMCORR',
+    firHelp     => 'PLUGIN_SQUEEZEDSP_ROOMCORR_HELP',
+    firNone     => 'PLUGIN_SQUEEZEDSP_FILTERNONE',
+    firStrength => 'PLUGIN_SQUEEZEDSP_FIRSTRENGTH',
+    firStrengthHelp => 'PLUGIN_SQUEEZEDSP_FIRSTRENGTH_HELP',
+    crossfeed   => 'PLUGIN_SQUEEZEDSP_CROSSFEED',
+    crossfeedHelp => 'PLUGIN_SQUEEZEDSP_CROSSFEED_HELP',
     clipping    => 'PLUGIN_SQUEEZEDSP_LIVE_CLIPPING',
     clipNone    => 'PLUGIN_SQUEEZEDSP_LIVE_CLIP_NONE',
     clipYes     => 'PLUGIN_SQUEEZEDSP_LIVE_CLIP_YES',
@@ -145,7 +210,6 @@ my %LABELS = (
     source      => 'PLUGIN_SQUEEZEDSP_LIVE_SOURCE',
     stages      => 'PLUGIN_SQUEEZEDSP_LIVE_STAGES',
     float       => 'PLUGIN_SQUEEZEDSP_LIVE_FLOAT',
-    more        => 'PLUGIN_SQUEEZEDSP_LIVE_MORE',
     back        => 'PLUGIN_SQUEEZEDSP_LIVE_BACK',
     noPlayer    => 'PLUGIN_SQUEEZEDSP_LIVE_NO_PLAYER',
     saved       => 'PLUGIN_SQUEEZEDSP_LIVE_SAVED',
@@ -173,6 +237,23 @@ sub _handler {
     my ( $httpClient, $response ) = @_;
     return unless $httpClient && $httpClient->connected;
 
+    # the classic interface chosen (the plugin's pref interface, Simon 2026-11-20): this page never runs then; the
+    # browser goes to the classic page for the same player, inside Material's skin when Material asked for this page
+    # (its entry in each player's menu and its Home tile, registered whichever interface is chosen)
+    if ( interface() ne 'new' ) {
+        my %q    = eval { $response->request->uri->query_form };
+        my $ref  = eval { $response->request->header('Referer') } // '';
+        my $base = $ref =~ m{^https?://[^/]+/material/} ? '/material/' : '/';
+        my $to   = $base . 'plugins/SqueezeDSP/index.html' . ( defined $q{player} && length $q{player} ? '?player=' . uriEsc( $q{player} ) : '' );
+        my $none = '';
+        $response->code(302);
+        $response->header( Location        => $to );
+        $response->header( 'Cache-Control' => 'no-cache, no-store, must-revalidate' );
+        $response->content_length(0);
+        Slim::Web::HTTP::addHTTPResponse( $httpClient, $response, \$none );
+        return;
+    }
+
     my $body = page();
     $body = Encode::encode_utf8($body) if utf8::is_utf8($body);    # octets on the wire, counted below
 
@@ -199,6 +280,31 @@ sub page {
     $html =~ s/\@\@V\@\@/$v/g;
     $html =~ s/\@\@DATA\@\@/$json/;
     return $html;
+}
+
+# the interface the user chose (Plugin.pm's pref, read here directly: Page.pm calls nothing in Plugin.pm)
+sub interface {
+    my $v = eval { Slim::Utils::Prefs::preferences('plugin.squeezedsp')->get('interface') };
+    return ( defined $v && $v eq 'new' ) ? 'new' : 'classic';
+}
+
+# a value for a URL's query
+sub uriEsc {
+    my $s = shift // '';
+    utf8::encode($s) if utf8::is_utf8($s);
+    $s =~ s/([^A-Za-z0-9\-_.~])/sprintf('%%%02X', ord $1)/ge;
+    return $s;
+}
+
+# moveDoc: a document that sends the browser on to a URL of this server (the classic page's address, with the new
+# interface chosen), without leaving itself in the history; a page function owns no status code to redirect with
+sub moveDoc {
+    my $url = shift // PATH;
+    my $js  = JSON::XS->new->ascii->allow_nonref->encode($url);
+    $js =~ s{</}{<\\/}g;
+    my $html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=' . _esc($url) . '">'
+             . '<script>location.replace(' . $js . ');</script></head><body></body></html>';
+    return \$html;
 }
 
 sub _esc {
@@ -384,6 +490,7 @@ $PAGE = <<'HTML';
     <span class="sub">@@VERSION@@</span>
     <span class="dot" id="dot"></span>
     <span class="flash" id="flash"></span>
+    <button type="button" id="classic"></button>
     <button type="button" id="back"></button>
   </div>
   <div class="err" id="err"></div>
@@ -391,6 +498,9 @@ $PAGE = <<'HTML';
   <div id="app"></div>
 </div>
 <script>var SQDSP = @@DATA@@;</script>
+<script src="/plugins/SqueezeDSP/js/sqdsp_peq_lib.js?v=@@V@@"></script>
+<script src="/plugins/SqueezeDSP/js/sqdsp_graph.js?v=@@V@@"></script>
+<script src="/plugins/SqueezeDSP/js/sqdsp_autoeq.js?v=@@V@@"></script>
 <script src="/plugins/SqueezeDSP/live/sqdsp_live.js?v=@@V@@"></script>
 </body>
 </html>

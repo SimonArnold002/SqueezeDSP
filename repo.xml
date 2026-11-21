@@ -4,16 +4,16 @@
     <title lang="EN">SqueezeDSP fork (dev)</title>
   </details>
   <plugins>
-    <plugin name="SqueezeDSP" version="0.1.72.56" minTarget="7.8.0" maxTarget="*">
-      <title lang="EN">Squeeze DSP</title>
+    <plugin name="SqueezeDSP" version="0.1.72.58" minTarget="7.8.0" maxTarget="*">
+      <title lang="EN">Squeeze DSP (Gipsy SRC Version)</title>
       <desc lang="EN">Squeeze DSP and Room Correction. Fork of Foxenfurter's 0.1.72 (dev build): every format goes through the DSP, output is 24-bit FLAC or WAV</desc>
       <category>tools</category>
       <url>https://raw.githubusercontent.com/SimonArnold002/SqueezeDSP/dev/SqueezeDSP.zip</url>
       <icon>https://raw.githubusercontent.com/SimonArnold002/SqueezeDSP/dev/SqueezeDSP/HTML/EN/plugins/SqueezeDSP/images/squeezedsp-blu.png</icon>
       <link>https://github.com/SimonArnold002/SqueezeDSP/tree/dev</link>
-      <creator>Jonathan Fox (Foxenfurter/Foxesden)</creator>
+      <creator>Simon Arnold (CrystalGipsy) / Jonathan Fox (Foxenfurter/Foxesden)</creator>
       <email></email>
-      <sha>bd50c035d715cc0b3c1c1fedba74d25601eea099</sha>
+      <sha>7057ca0fdd11e0b1f743e396de204e83a81433fa</sha>
     </plugin>
   </plugins>
 </extensions>

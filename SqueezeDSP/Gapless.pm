@@ -32,13 +32,18 @@ my @FIELDS = qw(continues prev this follows next exact);
 my %LAST;
 
 # A player that needs a stream's true length before its first byte (a UPnP or bridged player that gets stuck at the end
-# of a track) has our own per-player option on: "Exact track length" (ExactLength 1 in its settings), off by default,
-# so every other player plays as before. Ours alone: no other plugin has to declare anything (Simon 2026-11-15).
+# of a track) has our own per-player option on: "Exact track length" (ExactLength 1 in its settings). Ours alone: no
+# other plugin has to declare anything (Simon 2026-11-15). ON BY DEFAULT since 0.1.72.57 (Simon 2026-11-20: "exact
+# track lenght should be on by default"; on native squeezelite it "made no difference"): a player whose settings hold
+# no ExactLength takes it; one holding 0 (or anything but 1) does not; settings that cannot be read, no.
 sub exactLength {
     my $client = shift;
     return 0 unless ref $client;
-    my $v = eval { Plugins::SqueezeDSP::Configuration::clientPrefs($client)->{ExactLength} };
-    return ( defined $v && "$v" eq '1' ) ? 1 : 0;
+    my $ok = eval { my $p = Plugins::SqueezeDSP::Configuration::clientPrefs($client); [ ref $p eq 'HASH' ? $p->{ExactLength} : undef ] };
+    return 0 unless $ok;
+    my $v = $ok->[0];
+    return 1 unless defined $v;
+    return "$v" eq '1' ? 1 : 0;
 }
 
 # The note's path for a player id; undef without the temp folder or an id
