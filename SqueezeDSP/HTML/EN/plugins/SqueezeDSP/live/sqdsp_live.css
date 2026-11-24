@@ -143,6 +143,9 @@ select, input[type="text"] { font: inherit; color: var(--fg); background: var(--
                              border-radius: 4px; padding: 5px 8px; min-width: 0; }
 .presets .c select { flex: 1 1 140px; }
 .c select.filter { flex: 1 1 220px; max-width: 100%; }
+/* the filter guide's link beside a choice (0.1.72.59) */
+.c a.guide { color: var(--accent); font-size: 0.9em; white-space: nowrap; text-decoration: none; }
+.c a.guide:hover, .c a.guide:focus-visible { text-decoration: underline; }
 .presets .c input { flex: 1 1 140px; }
 
 /* support links at the foot: Fox's Ko-fi, Simon's Buy Me a Coffee */

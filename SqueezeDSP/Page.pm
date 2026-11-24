@@ -99,6 +99,8 @@ my %LABELS = (
     filterMedium => 'PLUGIN_SQUEEZEDSP_SRC_FILTER_MEDIUM',
     filterLong  => 'PLUGIN_SQUEEZEDSP_SRC_FILTER_LONG',
     filterXLong => 'PLUGIN_SQUEEZEDSP_SRC_FILTER_XLONG',
+    # the filter guide's link (filters.html, 0.1.72.59): beside the filters on the SRC tab and the modulator on the DSD tab
+    filterGuide => 'PLUGIN_SQUEEZEDSP_FILTER_GUIDE',
     pcmProc     => 'PLUGIN_SQUEEZEDSP_PCM_PROC',
     pcmProcHelp => 'PLUGIN_SQUEEZEDSP_PCM_PROC_HELP',
     dsdProc     => 'PLUGIN_SQUEEZEDSP_DSD_PROC',

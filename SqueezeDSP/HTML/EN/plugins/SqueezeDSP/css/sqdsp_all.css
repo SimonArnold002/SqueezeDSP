@@ -1609,3 +1609,8 @@ tr.sqdsp-overridden > td.rowTitle, tr.sqdsp-overridden > td.rowBody { opacity: 0
 /* the processing speed (SqueezeDSP fork 0.1.72.57): the new page's figure */
 .sqdsp-speed { font-weight: 600; font-variant-numeric: tabular-nums; }
 .sqdsp-speed.none { font-weight: 400; opacity: 0.6; }
+
+/* the filter guide's link beside the filters and the modulator (SqueezeDSP fork 0.1.72.59) */
+.sqdsp-guide { color: RoyalBlue; font-size: 12px; white-space: nowrap; text-decoration: none; }
+.sqdsp-guide:hover, .sqdsp-guide:focus-visible { text-decoration: underline; }
+@media (prefers-color-scheme: dark) { .sqdsp-guide { color: #82b1ff; } }

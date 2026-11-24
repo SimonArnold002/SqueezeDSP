@@ -642,7 +642,8 @@ print ( $myversion );
             <select class="sqdsp-select sqdsp-filter" id="upsample-pcm-filter-cd-selector"
                     onchange="NewFieldValue('UpsamplePCMFilterCD', this, false); LocalSetupUpsample();"></select>
         </TD>
-        <TD class="rowSuffix"></TD>
+        <!-- the filter guide (0.1.72.59), in a new tab -->
+        <TD class="rowSuffix"><a class="sqdsp-guide" href="/plugins/SqueezeDSP/filters.html?v=[% cacheBust %]#src" target="_blank" rel="noopener">[% "PLUGIN_SQUEEZEDSP_FILTER_GUIDE" | string %]</a></TD>
     </TR>
     <TR id="control_UpsamplePCMFilterHiRes" class="sqdsp-src-pcm">
         <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_SRC_FILTER_HIRES" | string %]</span></TD>
@@ -696,7 +697,8 @@ print ( $myversion );
             <select class="sqdsp-select sqdsp-filter" id="upsample-filter-cd-selector"
                     onchange="NewFieldValue('UpsampleFilterCD', this, false); LocalSetupUpsample();"></select>
         </TD>
-        <TD class="rowSuffix"></TD>
+        <!-- the filter guide (0.1.72.59), in a new tab -->
+        <TD class="rowSuffix"><a class="sqdsp-guide" href="/plugins/SqueezeDSP/filters.html?v=[% cacheBust %]#src" target="_blank" rel="noopener">[% "PLUGIN_SQUEEZEDSP_FILTER_GUIDE" | string %]</a></TD>
     </TR>
     <TR id="control_UpsampleFilterHiRes" class="sqdsp-src-dsd">
         <TD class="rowTitle" style="padding-left: 28px;"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_SRC_FILTER_HIRES" | string %]</span></TD>
@@ -937,7 +939,8 @@ print ( $myversion );
                 </div>
             </div>
         </TD>
-        <TD class="rowSuffix"></TD>
+        <!-- the filter guide (0.1.72.59), in a new tab -->
+        <TD class="rowSuffix"><a class="sqdsp-guide" href="/plugins/SqueezeDSP/filters.html?v=[% cacheBust %]#mod" target="_blank" rel="noopener">[% "PLUGIN_SQUEEZEDSP_FILTER_GUIDE" | string %]</a></TD>
     </TR>
     <TR id="control_DSDOutDSP">
         <TD class="rowTitle"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_DSD_OUT_DSP" | string %]</span></TD>

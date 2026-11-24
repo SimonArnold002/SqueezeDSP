@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The filter guide, linked from both pages. The same text is published as the shareable copy:
+     edit both together (Simon 2026-11-23). -->
+<title>SqueezeDSP Filter Guide</title>
+<style>
+/* Layout: one reading column of tables, Material's own greys and blue so it sits beside the plugin's pages. */
+:root {
+  --bg: #fafafa; --card: #ffffff; --fg: rgba(0,0,0,0.87); --dim: rgba(0,0,0,0.6);
+  --line: rgba(0,0,0,0.12); --head: #f0f2f5; --accent: #1976d2; --chip: rgba(25,118,210,0.10);
+  --leak: #9a5b00; --leakbg: rgba(178,106,0,0.12);
+  --font: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #212121; --card: #2b2b2b; --fg: #ffffff; --dim: rgba(255,255,255,0.64);
+  --line: rgba(255,255,255,0.12); --head: #333538; --accent: #82b1ff; --chip: rgba(130,177,255,0.14);
+  --leak: #ffb74d; --leakbg: rgba(255,183,77,0.14); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #212121; --card: #2b2b2b; --fg: #ffffff; --dim: rgba(255,255,255,0.64);
+  --line: rgba(255,255,255,0.12); --head: #333538; --accent: #82b1ff; --chip: rgba(130,177,255,0.14);
+  --leak: #ffb74d; --leakbg: rgba(255,183,77,0.14); color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font); }
+.wrap { max-width: 980px; margin: 0 auto; padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 28px; }
+header { display: grid; gap: 6px; }
+h1 { font-size: 24px; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 18px; font-weight: 600; margin: 0; text-wrap: balance; }
+h3 { font-size: 15px; font-weight: 600; margin: 0; }
+p { margin: 0; max-width: 68ch; }
+.lead { color: var(--dim); }
+nav { display: flex; flex-wrap: wrap; gap: 8px; }
+nav a { color: var(--accent); text-decoration: none; padding: 4px 10px; border: 1px solid var(--line);
+  border-radius: 14px; font-size: 13px; background: var(--card); }
+nav a:hover, nav a:focus-visible { border-color: var(--accent); outline: none; }
+section { display: grid; gap: 12px; min-width: 0; scroll-margin-top: 12px; }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+tbody tr:last-child td { border-bottom: 0; }
+th { background: var(--head); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--dim);
+  white-space: nowrap; }
+td.n { white-space: nowrap; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+.chip { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; padding: 1px 6px;
+  border-radius: 9px; background: var(--chip); color: var(--accent); margin-left: 6px; vertical-align: 1px; }
+.chip.leak { background: var(--leakbg); color: var(--leak); }
+.meter { display: inline-flex; gap: 3px; vertical-align: -1px; margin-right: 6px; }
+.meter i { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--dim); }
+.meter i.on { background: var(--fg); border-color: var(--fg); }
+.dim { color: var(--dim); }
+.notes { display: grid; gap: 4px; padding-left: 18px; margin: 0; color: var(--dim); max-width: 75ch; }
+.callout { border-left: 3px solid var(--accent); background: var(--chip); padding: 10px 14px; border-radius: 0 6px 6px 0; max-width: 75ch; }
+.callout a { color: var(--accent); }
+.ring { color: var(--accent); display: block; }
+.key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--dim); font-size: 13px; }
+footer { color: var(--dim); font-size: 13px; border-top: 1px solid var(--line); padding-top: 12px; }
+@media (max-width: 520px) { h1 { font-size: 21px; } th, td { padding: 7px 8px; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header>
+  <h1>SqueezeDSP Filter Guide</h1>
+  <p class="lead">Each filter shapes the treble and sharp sounds (drum hits, plucked strings) its own way. Choose by ear and by the music. The figures describe each one; they do not rank them.</p>
+  <nav aria-label="Sections">
+    <a href="#src">SRC filters</a><a href="#phase">Phase</a><a href="#dsd">DSD decoding</a>
+    <a href="#mod">Modulators</a><a href="#speed">Speed</a><a href="#tests">How we tested</a>
+  </nav>
+</header>
+
+<section id="src">
+  <h2>SRC filters</h2>
+  <p>Each entry in the filter list is <b>shape · length · phase</b>, for example <i>Kaiser · Short · Linear</i>. You pick one for 44.1/48 kHz tracks and one for hi-res tracks. PCM out and the converter to DSD each have their own pair.</p>
+  <div class="key"><span><b>Treble</b>: level at 20 kHz / 21 kHz (0 dB = untouched)</span><span><b>Ringing</b>: how long the filter echoes around a sharp sound (1 ms = a thousandth of a second)</span><span><b>Images</b>: mirror copies of the music above 22 kHz that upsampling makes</span></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Shape · length</th><th>What it does</th><th>Treble 20k / 21k</th><th>Ringing</th><th>Images</th><th>Load</th><th>Track start</th></tr></thead>
+    <tbody>
+      <tr><td>Kaiser · Short<span class="chip">DEFAULT</span></td><td>Full treble to 20 kHz, eases off just above. Short ringing.</td><td class="n">0 / −5 dB</td><td class="n">2.4 ms</td><td>Removed</td><td class="n"><span class="meter"><i class="on"></i><i class="on"></i><i></i><i></i></span>Light</td><td class="n">Instant</td></tr>
+      <tr><td>Kaiser · Long</td><td>Keeps the whole top octave, then a steep cut. Rings longer.</td><td class="n">0 / 0 dB</td><td class="n">20 ms</td><td>Removed</td><td class="n"><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>Medium</td><td class="n">≈ 0.2 s</td></tr>
+      <tr><td>Kaiser · Extra-long</td><td>The steepest cut, closest to the edge. The longest ringing.</td><td class="n">0 / 0 dB</td><td class="n">38 ms</td><td>Removed</td><td class="n"><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span>Heavy</td><td class="n">≈ 0.3 s</td></tr>
+      <tr><td>Gaussian · Short</td><td>Treble eased at the very top. Short ringing.</td><td class="n">−3 / −46 dB</td><td class="n">2.0 ms</td><td>Removed</td><td class="n"><span class="meter"><i class="on"></i><i class="on"></i><i></i><i></i></span>Light</td><td class="n">Instant</td></tr>
+      <tr><td>Gaussian · Medium</td><td>Full to 20 kHz, then a softer slope than Kaiser.</td><td class="n">0 / −16 dB</td><td class="n">3.0 ms</td><td>Removed</td><td class="n"><span class="meter"><i class="on"></i><i class="on"></i><i></i><i></i></span>Light</td><td class="n">Instant</td></tr>
+      <tr><td>Gaussian · Long</td><td>Keeps the whole top octave, with Gaussian shaping.</td><td class="n">0 / 0 dB</td><td class="n">23 ms</td><td>Removed</td><td class="n"><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>Medium</td><td class="n">≈ 0.15 s</td></tr>
+      <tr><td>Half-band<span class="chip leak">LEAKY</span></td><td>Keeps the whole top octave. Lets a little through just above 21 kHz on purpose.</td><td class="n">0 / 0 dB</td><td class="n">2.4 ms</td><td>Removed for music up to 21 kHz</td><td class="n"><span class="meter"><i class="on"></i><i class="on"></i><i></i><i></i></span>Light</td><td class="n">Instant</td></tr>
+      <tr><td>Slow roll-off<span class="chip leak">LEAKY</span></td><td>A gentle treble fade that starts early. Very short ringing.</td><td class="n">−0.4 / −1.9 dB</td><td class="n">0.5 ms</td><td>Partly (−27 dB)</td><td class="n"><span class="meter"><i class="on"></i><i></i><i></i><i></i></span>Very light</td><td class="n">Instant</td></tr>
+      <tr><td>Non-ringing<span class="chip leak">LEAKY</span></td><td>Never rings. The softest treble (−1.7 dB at 15 kHz). One version only, no phase choice.</td><td class="n">−3 / −3.3 dB</td><td class="n">None</td><td>Mostly left in (−4.5 dB)</td><td class="n"><span class="meter"><i class="on"></i><i></i><i></i><i></i></span>Very light</td><td class="n">Instant</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="notes">
+    <li>Figures are for a 44.1 kHz track with Linear phase. From a hi-res track every filter is flat to 20 kHz, except Non-ringing (−0.6 dB).</li>
+    <li>Going down in rate, the three leaky filters run as Kaiser · Short in the phase you chose, so nothing folds back into the music.</li>
+    <li>Load, measured live on the test server (44.1 kHz to 705.6 kHz), on top of Kaiser Short: Gaussian Medium the same; Gaussian Long about 16% more of one CPU core; Kaiser Extra-long about 21% more. About twice that for a 96 kHz track. Kaiser's Intermediate phases take 1.6–2.2× the work of its Linear; Gaussian's about the same as Linear.</li>
+    <li>Track start is the time to build the filter (Apple M3). Long and Extra-long at Intermediate 80% or 70% take about 1.1 s and 2.6 s.</li>
+  </ul>
+</section>
+
+<section id="phase">
+  <h2>Phase</h2>
+  <p>Phase decides where the ringing sits around a sharp sound: before it, after it, or both.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Phase</th><th>Ringing around a sharp sound</th><th>Before</th><th>After</th><th>Treble timing</th></tr></thead>
+    <tbody>
+      <tr><td>Linear<span class="chip">DEFAULT HI-RES</span></td><td><svg class="ring" width="150" height="16" viewBox="0 0 150 16" role="img" aria-label="Equal ringing before and after"><rect x="39" y="5" width="36" height="6" fill="currentColor"/><rect x="75" y="5" width="36" height="6" fill="currentColor"/><rect x="74" y="1" width="2" height="14" fill="currentColor"/></svg></td><td>Strongest: the same as after</td><td class="n">2.2 ms</td><td>In step with the rest</td></tr>
+      <tr><td>Intermediate 80%</td><td><svg class="ring" width="150" height="16" viewBox="0 0 150 16" role="img" aria-label="Weaker ringing before"><rect x="37" y="5" width="38" height="6" fill="currentColor" fill-opacity="0.5"/><rect x="75" y="5" width="41" height="6" fill="currentColor"/><rect x="74" y="1" width="2" height="14" fill="currentColor"/></svg></td><td>Weaker</td><td class="n">2.4 ms</td><td class="n">0.12 ms late</td></tr>
+      <tr><td>Intermediate 70%</td><td><svg class="ring" width="150" height="16" viewBox="0 0 150 16" role="img" aria-label="Weaker still before"><rect x="44" y="5" width="31" height="6" fill="currentColor" fill-opacity="0.38"/><rect x="75" y="5" width="46" height="6" fill="currentColor"/><rect x="74" y="1" width="2" height="14" fill="currentColor"/></svg></td><td>Weaker still</td><td class="n">2.8 ms</td><td class="n">0.17 ms late</td></tr>
+      <tr><td>Intermediate<span class="chip">DEFAULT 44.1/48</span></td><td><svg class="ring" width="150" height="16" viewBox="0 0 150 16" role="img" aria-label="Faint ringing before"><rect x="51" y="5" width="24" height="6" fill="currentColor" fill-opacity="0.22"/><rect x="75" y="5" width="53" height="6" fill="currentColor"/><rect x="74" y="1" width="2" height="14" fill="currentColor"/></svg></td><td>Faint</td><td class="n">3.2 ms</td><td class="n">0.30 ms late</td></tr>
+      <tr><td>Minimum</td><td><svg class="ring" width="150" height="16" viewBox="0 0 150 16" role="img" aria-label="No ringing before"><rect x="75" y="5" width="69" height="6" fill="currentColor"/><rect x="74" y="1" width="2" height="14" fill="currentColor"/></svg></td><td>None</td><td class="n">4.1 ms</td><td class="n">0.58 ms late</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="notes">
+    <li>Bars are to scale in time; a lighter bar is weaker ringing. The line in the middle is the sharp sound.</li>
+    <li>Measured on Kaiser · Short at 44.1 kHz. Longer filters ring longer in every phase (Extra-long Minimum: 77 ms after).</li>
+    <li>Treble timing: how much later 20 kHz arrives than 1 kHz.</li>
+  </ul>
+</section>
+
+<section id="dsd">
+  <h2>DSD decoding</h2>
+  <p>DSD carries strong noise above the music; the low-pass removes it. With DSD out, the DSP rate sets the route. With PCM out, a DSD file is turned into PCM.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>DSP rate</th><th>What happens to a DSD file</th></tr></thead>
+    <tbody>
+      <tr><td>DXD 352.8 kHz<br>176.4 kHz</td><td>Our decoder turns it into PCM at that rate. The DSP works there, then the modulator makes DSD again.</td></tr>
+      <tr><td>Native</td><td>It stays at its own DSD rate (2.8 MHz for DSD64) and never goes down to a PCM rate. The integrator removes the noise, the DSP works at the DSD rate, then the modulator makes DSD again. DSF files only: DFF and WavPack DSD files, and a DSD rate out below the file's own, take the DXD route.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="callout"><b>Native needs a fast computer.</b> DSD Native DSP needs a fast multi-core desktop Intel processor or an Apple Silicon (M-series) Mac. Speed varies with each setup (see <a href="#speed">Speed across rates</a>). Tested: a Mac mini M6 runs Native at DSD256 in and out at 2× real time.</p>
+  <h3>Low-pass</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Low-pass</th><th>What it does</th><th>Noise left above 50 kHz (DSD64)</th><th>Peaks</th><th>Decode speed (M3)</th></tr></thead>
+    <tbody>
+      <tr><td>24 kHz</td><td>Conservative: cuts the noise from just above the music.</td><td class="dim">Not measured on its own</td><td class="dim">—</td><td class="dim">—</td></tr>
+      <tr><td>30 kHz<span class="chip">DEFAULT</span></td><td>Recommended.</td><td class="n">−167 dB</td><td>The music's</td><td class="n">44× real time</td></tr>
+      <tr><td>50 kHz</td><td>Permissive: keeps more of the ultrasonics.</td><td class="dim">Not measured on its own</td><td class="dim">—</td><td class="dim">—</td></tr>
+      <tr><td>None</td><td>Passes DSD's noise on to the DSP and the DAC. With Native, the integrator still cuts from 80–100 kHz.</td><td class="n">−25 dB</td><td>3–5 dB above the music</td><td class="n">90× real time</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="notes">
+    <li>Noise, peaks and speed measured on the DXD route. With Native, the low-pass sets where the integrator cuts.</li>
+  </ul>
+  <h3>Integrator <span class="dim">(only with the DSP rate Native)</span></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Integrator</th><th>What it does</th><th>Ringing before</th><th>Flat to 20 kHz</th><th>Speed (M3, DSD64, with a FIR)</th></tr></thead>
+    <tbody>
+      <tr><td>Linear<span class="chip">DEFAULT</span></td><td>Even ringing before and after.</td><td>Yes (−14 to −15 dB)</td><td class="n">within 0.00001 dB</td><td class="n">2.7×</td></tr>
+      <tr><td>Intermediate</td><td>Little ringing before.</td><td>Faint (−37 to −41 dB)</td><td class="n">within 0.0024 dB</td><td class="dim">—</td></tr>
+      <tr><td>Minimum</td><td>No ringing before.</td><td>None</td><td class="n">within 0.00001 dB</td><td class="dim">—</td></tr>
+      <tr><td>Non-ringing</td><td>Never rings. A gentle slope, 3 dB down at the low-pass frequency.</td><td>None</td><td>Gentle slope</td><td class="n">3.5×</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="notes">
+    <li>All four ran 594 test runs (DSD64, DSD128 and DSD256 sources) with 0 modulator resets and nothing limited.</li>
+    <li>One difference showed: Adaptive at DSD64 out with the widest bands (Low-pass None, or Non-ringing at 50 kHz) added 3–5 dB more noise in the audio band.</li>
+  </ul>
+</section>
+
+<section id="mod">
+  <h2>Modulators</h2>
+  <p>The modulator turns the DSP's output back into DSD. Every modulator adds a little noise; it pushes most of it above the music. Each has two tunings, picked for you: one for PCM sources, one for DSD sources (DSD recordings can be louder).</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Modulator</th><th>What it does</th><th>Source</th><th>DSD64</th><th>DSD128</th><th>DSD256</th><th>DSD512</th><th>Stability</th><th>CPU</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="2">Standard<span class="chip">DEFAULT</span></td><td rowspan="2">The classic noise-shaping design.</td><td>PCM</td><td class="n">−133</td><td class="n">−154</td><td class="n">−157</td><td class="n">−163</td><td rowspan="2">0 resets in every test</td><td rowspan="2">1×</td></tr>
+      <tr><td>DSD</td><td class="n">−122</td><td class="n">−143</td><td class="n">−146</td><td class="n">−151</td></tr>
+      <tr><td rowspan="2">CLANS</td><td rowspan="2">A design built for stability. Less noise in the audio band than Standard at every rate.</td><td>PCM</td><td class="n">−143</td><td class="n">−160</td><td class="n">−163</td><td class="n">−169</td><td rowspan="2">0 resets in every test</td><td rowspan="2">1×</td></tr>
+      <tr><td>DSD</td><td class="n">−128</td><td class="n">−147</td><td class="n">−150</td><td class="n">−155</td></tr>
+      <tr><td>Adaptive</td><td>At DSD64 a design of its own. At DSD128 and up, exactly Standard.</td><td>Both</td><td class="n">−144</td><td colspan="3">As Standard</td><td>0 resets in every test</td><td>≈ 2.5× at DSD64, 1× above</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="notes">
+    <li>Figures: noise each modulator adds in the audio band (20 Hz–20 kHz), in dB, with a 1 kHz test tone. Lower is quieter. For scale: a CD's own noise floor is about −98 dB, a 24-bit recording's about −146 dB.</li>
+    <li>On 10 real DSD64 recordings, decoded and made into DSD64 again: Standard −120, CLANS −127 to −128, Adaptive −135 to −140.</li>
+    <li>The quiet zone above the music widens with each step up in DSD rate.</li>
+    <li>CPU: the modulator's own work, relative to Standard. The whole route costs more at higher DSD rates: DSD256 out took 2.7× the CPU of DSD64 out on the same track.</li>
+  </ul>
+</section>
+
+<section id="speed">
+  <h2>Speed across rates</h2>
+  <p>How many times faster than real time each route runs. 1.0× just keeps up; below 1.0× that machine cannot play the route in real time.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Route</th><th>Machine</th><th>DSD64</th><th>DSD128</th><th>DSD256</th><th>DSD512</th></tr></thead>
+    <tbody>
+      <tr><td>DSD to DSD, DSP at DXD, with a FIR</td><td>Apple M3</td><td class="n">10.8×</td><td class="n">6.9×</td><td class="dim">—</td><td class="dim">—</td></tr>
+      <tr><td>DSD to DSD, DSP Native, with a FIR</td><td>Apple M3</td><td class="n">2.7×</td><td class="n">1.3×</td><td class="n">0.49×</td><td class="n">0.16×</td></tr>
+      <tr><td>DSD to DSD, DSP Native, no FIR</td><td>Apple M3</td><td class="n">7.1×</td><td class="n">3.3×</td><td class="n">1.6×</td><td class="n">0.96×</td></tr>
+      <tr><td>DSD to DSD, DSP Native</td><td>Mac mini M6</td><td class="dim">—</td><td class="dim">—</td><td class="n">2×</td><td class="dim">—</td></tr>
+      <tr><td>DSD to DSD256, DSP Native</td><td>Test server</td><td class="n">2.8×</td><td class="n">1.7×</td><td class="n">0.70×</td><td class="dim">—</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="notes">
+    <li>Columns are the source's DSD rate. DSD to DSD goes out at the source's own rate unless named. DSD512 no-FIR figure with the Non-ringing integrator; the test server's DSD64 run had a PEQ loaded.</li>
+    <li>PCM 44.1 kHz to DSD256 (the converter, through 705.6 kHz, with a FIR) on the test server: 3.3–3.7×, depending on the filter.</li>
+    <li>Test server: Intel Core i7 (Tiger Lake), 8 threads.</li>
+  </ul>
+</section>
+
+<section id="tests">
+  <h2>How we tested</h2>
+  <ul class="notes">
+    <li>Every SRC filter measured at 44.1 kHz and 96 kHz, the first family cross-checked in MATLAB. Kaiser and Gaussian remove images by 170 dB or more.</li>
+    <li>Rate pairs tested: up, down and odd ratios (such as 44.1 to 48 kHz), up to 768 kHz.</li>
+    <li>Gapless: tracks join byte for byte with every filter family tested.</li>
+    <li>Modulators: 7 test signals × 4 DSD rates × 3 modulators at full level, 10 real DSD recordings (DSD64 to DSD512), and live playback on the test server. 0 resets.</li>
+    <li>Live by ear on several players, including an Eversolo DMP-A8 and a FiiO M11 Plus.</li>
+  </ul>
+</section>
+
+<footer>SqueezeDSP (Gipsy SRC Version). Figures from our own test runs, November 2026.</footer>
+</div>
+</body>
+</html>

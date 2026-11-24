@@ -660,6 +660,7 @@
         UI.filters = {};
         filterGroups(UI.upOpts, [['UpsamplePCMFilterCD', L.filterCd || 'Filter, 44.1/48 kHz sources'],
                                  ['UpsamplePCMFilterHiRes', L.filterHiRes || 'Filter, hi-res sources']], true);
+        guideLink(UI.filters.UpsamplePCMFilterCD.parentNode, 'src');
         UI.dsdOpts = sc.appendChild(make('div', 'dsdopts'));
         UI.dsdRate = control(UI.dsdOpts, 'dsdrate', L.dsdRate || 'DSD rate', null, true);
         UI.dsdRateSeg = segment(UI.dsdRate.c, DSD_RATES.map(function (r) { return [String(r), DSD_RATE_NAMES[r]]; }),
@@ -667,6 +668,7 @@
         // its filters: the engine takes every PCM track to 705.6k itself, by the one for the track's rate
         filterGroups(UI.dsdOpts, [['UpsampleFilterCD', L.filterCd || 'Filter, 44.1/48 kHz sources'],
                                   ['UpsampleFilterHiRes', L.filterHiRes || 'Filter, hi-res sources']], true);
+        guideLink(UI.filters.UpsampleFilterCD.parentNode, 'src');
 
         // PCM Processing: the output (its resampler's filters are the converter's, on the SRC tab)
         var pp = pane('pcm', L.pcmProc || 'PCM Processing Settings', L.pcmProcHelp);
@@ -699,6 +701,7 @@
         UI.dsdModSeg = segment(UI.dsdMod.c, [['standard', L.dsdOutStandard || 'Standard'], ['clans', 'CLANS'],
                                              ['adaptive', L.dsdOutAdaptive || 'Adaptive']],
                                function (v) { change('DSDOutMod', v); });
+        guideLink(UI.dsdMod.c, 'mod');
         UI.dsdDsp = control(dp, 'dsdoutdsp', L.dsdOutDsp || 'DSP rate');
         UI.dsdDspSeg = segment(UI.dsdDsp.c, DSD_DSP_RATES.map(function (r) {
                                    return [r, r === '352800' ? 'DXD 352.8 kHz' : r === 'native' ? (L.dsdNative || 'Native') : rate(r)];
@@ -823,6 +826,16 @@
             sel.addEventListener('change', function () { change(key, sel.value); });
             UI.filters[key] = sel;
         });
+    }
+
+    // the filter guide (filters.html, 0.1.72.59; Simon 2026-11-23): a plain link beside the choice, at the part it is
+    // about ('src', 'mod'), in a new tab as the support links are; the version in its address, as the page's own files
+    function guideLink(parent, part) {
+        var a = parent.appendChild(make('a', 'guide', L.filterGuide || 'Filter guide'));
+        a.href = '/plugins/SqueezeDSP/filters.html?v=' + encodeURIComponent(CFG.version || '') + '#' + part;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        return a;
     }
 
     function familyName(f) {

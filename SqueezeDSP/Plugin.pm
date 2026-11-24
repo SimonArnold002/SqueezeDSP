@@ -13,6 +13,10 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.61	Fork: the Filter guide opens (on 0.1.72.60 LMS answered its links with 404 Not Found).
+	0.1.72.60	Fork: the Filter guide: what each SRC filter, DSD filter and modulator does, with its tested
+				figures, linked beside the filters and the modulator on both pages; the DSD routes (Native stays
+				at the DSD rate), and Native's need for a fast computer. 0.1.72.59 was built, never installed.
 	0.1.72.58	Fork: SqueezeDSP is in each player's menu in Material again with the classic interface chosen; it
 				opens whichever interface is chosen.
 	0.1.72.57	Fork: the new page has every control the classic page has, with its help; one interface at a
@@ -310,7 +314,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.58";
+my $revision = "0.1.72.61";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
@@ -534,6 +538,9 @@ sub webPages {
     my $class = shift;
     if (Slim::Utils::PluginManager->isEnabled("Plugins::SqueezeDSP::Plugin")) {
         Slim::Web::Pages->addPageFunction("plugins/SqueezeDSP/index.html", \&handleWebIndex);
+        # the filter guide (0.1.72.61): LMS serves a plugin's .css and .js as files, but an .html page only through a
+        # page function (Slim::Web::HTTP: text/html is never static content), so without this both pages' links 404
+        Slim::Web::Pages->addPageFunction("plugins/SqueezeDSP/filters.html", \&handleFilterGuide);
         Slim::Web::Pages->addPageLinks("plugins", { $class->getDisplayName => 'plugins/SqueezeDSP/index.html' });
         # the SqueezeDSP page, a raw handler at /squeezedsp (Page.pm); its version handed in here, and the engine's log
         # path as a reference (/squeezedsp/log reads it at each request: set in initPlugin), and the temp folder's
@@ -601,6 +608,23 @@ sub handleWebIndex {
     }
     $params->{cacheBust} = $cacheBust;
     return Slim::Web::HTTP::filltemplatefile('plugins/SqueezeDSP/index.html', $params) if $client;
+}
+
+# the filter guide: its file's bytes as they are on disk, no template pass (nothing in it is read as a template, its
+# characters are never re-encoded); a player is not needed. Unreadable or empty: LMS's own 404 page, with its code.
+sub handleFilterGuide {
+    my ( $client, $params, undef, undef, $response ) = @_;
+    my $path = catfile( Slim::Utils::PluginManager->allPlugins->{$thisapp}->{'basedir'},
+        'HTML', 'EN', 'plugins', 'SqueezeDSP', 'filters.html' );
+    if ( open my $fh, '<:raw', $path ) {
+        local $/;
+        my $body = <$fh>;
+        close $fh;
+        return \$body if defined $body && length $body;
+    }
+    $log->warn("the filter guide could not be read: $path") if $log;
+    $response->code(404) if $response;
+    return Slim::Web::HTTP::filltemplatefile( 'html/errors/404.html', $params );
 }
 
 
