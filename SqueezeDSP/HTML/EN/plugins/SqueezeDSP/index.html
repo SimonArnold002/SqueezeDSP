@@ -690,6 +690,40 @@ print ( $myversion );
         </TD>
         <TD class="rowSuffix"></TD>
     </TR>
+    <TR id="control_UpsampleDSDSource" class="sqdsp-src-dsd">
+        <TD class="rowTitle" style="padding-left: 28px;">
+            <div class="tooltip">
+                <span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE" | string %]</span>
+                <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_HELP" | string %]</span>
+            </div>
+        </TD>
+        <TD class="rowBody">
+            <div class="filter-group sqdsp-choice sqdsp-even" id="dsd-source-selector">
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampledsdsource" value="upsample"
+                               onchange="NewFieldValue('UpsampleDSDSource', this, false); LocalSetupAll();">
+                        <span>[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP" | string %]</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampledsdsource" value="source"
+                               onchange="NewFieldValue('UpsampleDSDSource', this, false); LocalSetupAll();">
+                        <span>[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN" | string %]</span>
+                    </label>
+                </div>
+                <div class="filter-type-container">
+                    <label class="filter-type">
+                        <input type="radio" name="upsampledsdsource" value="untouched"
+                               onchange="NewFieldValue('UpsampleDSDSource', this, false); LocalSetupAll();">
+                        <span>[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE" | string %]</span>
+                    </label>
+                </div>
+            </div>
+        </TD>
+        <TD class="rowSuffix"></TD>
+    </TR>
     <TR id="control_UpsampleFilterCD" class="sqdsp-src-dsd">
         <TD class="rowTitle" style="padding-left: 28px;"><span class="infoTitle">[% "PLUGIN_SQUEEZEDSP_SRC_FILTER_CD" | string %]</span></TD>
         <TD class="rowBody">

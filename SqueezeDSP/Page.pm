@@ -87,6 +87,12 @@ my %LABELS = (
     srcHelp     => 'PLUGIN_SQUEEZEDSP_SRC_HELP',
     convertTo   => 'PLUGIN_SQUEEZEDSP_SRC_CONVERT_TO',
     dsdRate     => 'PLUGIN_SQUEEZEDSP_SRC_DSD_RATE',
+    # what the converter to DSD does with a DSD file (Upsample::dsdSource)
+    dsdSource      => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE',
+    dsdSourceHelp  => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_HELP',
+    dsdSourceUp    => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP',
+    dsdSourceOwn   => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN',
+    dsdSourceLeave => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE',
     filterCd    => 'PLUGIN_SQUEEZEDSP_SRC_FILTER_CD',
     filterHiRes => 'PLUGIN_SQUEEZEDSP_SRC_FILTER_HIRES',
     # the filter family's names (0.1.72.44): the dropdown and the signal path's row

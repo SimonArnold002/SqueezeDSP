@@ -96,6 +96,10 @@ sub following {
         $next = 0;
     }
     my $track = eval { Slim::Player::Playlist::song( $client, $next ) };
+    # an untouched DSD track (Configuration::dsdUntouched) plays through LMS's own rule, so no engine of ours takes what this
+    # stream would hold for it: nothing of ours follows, and its filters play out at its own end
+    # (settings that cannot be read: one of ours, as before)
+    return ( 0, '' ) if ref $track && eval { Plugins::SqueezeDSP::Configuration::dsdUntouched( $client, $track->content_type ) };
     return ( 1, kind($track) );
 }
 

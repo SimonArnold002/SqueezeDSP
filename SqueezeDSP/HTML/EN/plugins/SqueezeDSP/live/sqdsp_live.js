@@ -103,7 +103,7 @@
     function defaults() {
         return {
             Bypass: 1, ExactLength: 1, OutputFormat: 'FLAC', Upsample: 'off', DSDCutoff: 30000, DSDGain: 0,
-            UpsampleDSDRate: 2822400, UpsampleFilterCD: 'short-int', UpsampleFilterHiRes: 'short-lin', DSDOut: 0, DSDOutMod: 'standard',
+            UpsampleDSDRate: 2822400, UpsampleDSDSource: 'upsample', UpsampleFilterCD: 'short-int', UpsampleFilterHiRes: 'short-lin', DSDOut: 0, DSDOutMod: 'standard',
             DSDOutDSP: 352800, DSDIntegrator: 'lin', UpsamplePCMFilterCD: 'short-int', UpsamplePCMFilterHiRes: 'short-lin',
             UpsampleTarget: 'family', UpsampleMax: 0, Preamp: 0, Balance: 0, Width: 0,
             Delay: { delay: 0 }, Loudness: { enabled: 0, listening_level: 85 }, Filters: [],
@@ -153,6 +153,9 @@
     // modulators (DSDOutMod) and the DSP's rate in between (DSDOutDSP)
     var DSD_RATES = [2822400, 5644800, 11289600, 22579200];
     var DSD_RATE_NAMES = { 2822400: 'DSD64', 5644800: 'DSD128', 11289600: 'DSD256', 22579200: 'DSD512' };
+    // what the converter to DSD does with a DSD file (the player's UpsampleDSDSource, Upsample::dsdSource): to its DSD rate,
+    // at the file's own, or untouched
+    var DSD_SOURCES = ['upsample', 'source', 'untouched'];
     var DSD_MODS = ['standard', 'clans', 'adaptive'];
     // the engine's filters (Upsample.pm @FILTERS, the engine's --upfilter), one for a source at 48 kHz and under and one
     // for hi-res; the converter to DSD's own (0.1.72.33) and PCM's own (0.1.72.37; Simon 2026-11-04: "Separate for PCM"),
@@ -191,7 +194,7 @@
     var XFEED_NAMES = { off: 'Off', light: 'Light', medium: 'Medium', strong: 'Strong', bonkers: 'Bonkers' };
     // what Reset keeps (the classic page's LocalClearSettings): how the player is fed, not its DSP
     var RESET_KEEP = ['OutputFormat', 'Upsample', 'UpsamplePCMFilterCD', 'UpsamplePCMFilterHiRes', 'UpsampleTarget', 'UpsampleMax',
-                      'UpsampleDSDRate', 'UpsampleFilterCD', 'UpsampleFilterHiRes', 'DSDCutoff', 'DSDGain', 'DSDOut', 'DSDOutMod',
+                      'UpsampleDSDRate', 'UpsampleDSDSource', 'UpsampleFilterCD', 'UpsampleFilterHiRes', 'DSDCutoff', 'DSDGain', 'DSDOut', 'DSDOutMod',
                       'DSDOutDSP', 'DSDIntegrator', 'ExactLength'];
     var ROLE_NAMES = { 'flac-dec': 'FLAC decode', 'flac-enc': 'FLAC encode', soxr: 'soxr', soxrate: 'SoX rate',
                        level: 'level', dsp: 'DSP', sox: 'SoX', ffmpeg: 'ffmpeg', wavlength: 'WAV length', dsd: 'DSD decode',
@@ -665,6 +668,10 @@
         UI.dsdRate = control(UI.dsdOpts, 'dsdrate', L.dsdRate || 'DSD rate', null, true);
         UI.dsdRateSeg = segment(UI.dsdRate.c, DSD_RATES.map(function (r) { return [String(r), DSD_RATE_NAMES[r]]; }),
                                 function (v) { change('UpsampleDSDRate', Number(v)); });
+        UI.dsdSrc = control(UI.dsdOpts, 'dsdsource', L.dsdSource || 'DSD sources', L.dsdSourceHelp, true);
+        UI.dsdSrcSeg = segment(UI.dsdSrc.c, [['upsample', L.dsdSourceUp || 'Upsample'], ['source', L.dsdSourceOwn || 'Source rate'],
+                                             ['untouched', L.dsdSourceLeave || 'Untouched']],
+                               function (v) { change('UpsampleDSDSource', v); });
         // its filters: the engine takes every PCM track to 705.6k itself, by the one for the track's rate
         filterGroups(UI.dsdOpts, [['UpsampleFilterCD', L.filterCd || 'Filter, 44.1/48 kHz sources'],
                                   ['UpsampleFilterHiRes', L.filterHiRes || 'Filter, hi-res sources']], true);
@@ -1122,6 +1129,7 @@
         setSegment(UI.targetSeg, e.target);
         setSegment(UI.maxSeg, String(e.max), MAXRATES.filter(function (m) { return m && e.limit && m > e.limit; }).map(String));
         setSegment(UI.dsdRateSeg, String(e.dsdrate));
+        setSegment(UI.dsdSrcSeg, dsdSource(c));
         Object.keys(UI.filters).forEach(function (key) {
             if (document.activeElement !== UI.filters[key]) { UI.filters[key].value = filterOf(c, key); }
         });
@@ -1152,6 +1160,10 @@
         var native = dsdOutDsp(c) === 'native';
         setSegment(UI.dsdIntSeg, dsdIntegrator(c));
         UI.dsdInt.row.classList.toggle('dimmed', !native);
+        // the decoder and the DSP rate are a DSD file's alone: shown overridden, still editable, while the converter leaves
+        // it untouched (the modulator is the PCM tracks' too)
+        var leave = mode === 'dsd' && dsdSource(c) === 'untouched';
+        [UI.dsdCut, UI.dsdGain, UI.dsdInt, UI.dsdDsp].forEach(function (r) { r.row.classList.toggle('overridden', leave); });
         UI.dsdInt.note.textContent = native ? '' : (L.dsdNativeOnly || 'With the DSP rate Native');
 
         // what DSP on drives: dimmed while it is off, still editable, and the tabs that hold it say so
@@ -1187,6 +1199,11 @@
     // the DSD settings as the engine takes them (LyrionDSPSettings buildConfig): unset or out of range, its default
     function dsdCutoff(c) { var v = num(c.DSDCutoff, NaN); return (v === 0 || (v > 20000 && v <= 60000)) ? v : 30000; }
     function dsdGain(c) { var v = num(c.DSDGain, NaN); return (v >= -24 && v <= 12) ? v : 0; }
+    // a DSD file under the converter to DSD, as the plugin takes the player's UpsampleDSDSource (trimmed, any case), else upsample
+    function dsdSource(c) {
+        var v = String(c.UpsampleDSDSource == null ? '' : c.UpsampleDSDSource).replace(/^[ "]+|[ "]+$/g, '').toLowerCase();
+        return DSD_SOURCES.indexOf(v) >= 0 ? v : 'upsample';
+    }
     // DSD out as the plugin takes it (Configuration::dsdOut: 1, on or true; dsdOutDSP: DXD unless 176400) and the engine
     // (LyrionDSPSettings: the modulator standard, clans or adaptive, spaces and quotes trimmed as the engine trims them,
     // else standard)

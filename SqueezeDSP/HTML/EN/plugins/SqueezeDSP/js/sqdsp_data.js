@@ -28,6 +28,7 @@ function InitialiseData()
         DSDCutoff: 30000,       // a DSF on our engine (0.3.13): its low-pass, Hz; 24000, 30000, 50000, or 0 for none
         DSDGain: 0,             // ... and its gain, dB: 0 or 6 (DSD plays 6 dB under PCM)
         UpsampleDSDRate: 2822400, // the Sample Rate Converter to DSD (Upsample "dsd"): 2822400, 5644800, 11289600, 22579200
+        UpsampleDSDSource: "upsample", // ... a DSD file: "upsample" to that rate, "source" its own rate, or "untouched" (Upsample::dsdSource)
         UpsampleFilterCD: "short-int",    // ... its filter for a source at 48 kHz and under: one of Upsample.pm's @FILTERS
         UpsampleFilterHiRes: "short-lin", // ... and for hi-res (Upsample::filters, the engine's --upfilter)
         DSDOut: 0,              // 1: with the converter off, a DSF goes out as DSD at its own rate (Configuration::dsdOut)

@@ -182,7 +182,7 @@ function LocalSetupOutput() {
 
 // The Sample Rate Converter (Upsample.pm, Configuration::dsdSpec; Simon 2026-11-03: "Call upsample Sample Rate Converter
 // and we choose either DSD or PCM here"): the player's Upsample 'off', 'on' (PCM: every track to its PCM target, as
-// before) or 'dsd' (every track to DSD at UpsampleDSDRate). readclientSettings says whether each can run: PCM (up_ok: the
+// before) or 'dsd' (every PCM track to DSD at UpsampleDSDRate, a DSD file as UpsampleDSDSource says). readclientSettings says whether each can run: PCM (up_ok: the
 // stream-start hook, a known max; the engine resamples, since 0.1.72.37) and DSD (up_dsd_ok: the player lists dsf, and
 // the hook; the engine takes PCM tracks up itself, with the converter's own filters, since 0.1.72.33). One that cannot
 // shows as off, its button disabled with the reason on it, and the note says why when it is the one stored. PCM's rows
@@ -243,6 +243,12 @@ function srcMode() {
     const can = playerCan(), want = srcWant();
     return (want === 'on' && can.upOk) ? 'on' : (want === 'dsd' && can.upDsdOk) ? 'dsd' : 'off';
 }
+// what the converter to DSD does with a DSD file (Upsample::dsdSource: any case, spaces and quotes trimmed), else upsample
+const DSD_SOURCES = ['upsample', 'source', 'untouched'];
+function dsdSource() {
+    const v = String(replaceNull(SqueezeDSPData.Client.UpsampleDSDSource, 'upsample')).replace(/^[ "]+|[ "]+$/g, '').toLowerCase();
+    return DSD_SOURCES.includes(v) ? v : 'upsample';
+}
 // why the converter to PCM cannot run (readclientSettings up_why), and why not to DSD
 function whyNoPcm(can) {
     const ids = { nomax: 'UpsampleNoMax_Help', hook: 'UpsampleNoHook_Help', reduced: 'UpsampleNoReduced_Help' };
@@ -298,6 +304,8 @@ function LocalSetupUpsample() {
     let dr = /^\d+$/.test(String(c.UpsampleDSDRate)) ? Number(c.UpsampleDSDRate) : 2822400;
     if (!DSD_RATE_NAMES[dr]) dr = 2822400;
     setChoice('dsd-rate-selector', dr, 2822400);
+    const src = dsdSource();
+    document.querySelectorAll('#dsd-source-selector input[type="radio"]').forEach(el => { el.checked = (el.value === src); });
     // its filters (0.1.72.33, Upsample::filters), and PCM's (0.1.72.37, Upsample::pcmFilters): a dropdown each of the
     // filter family (0.1.72.44), filled once; the stored one in any case, else the default (Kaiser short intermediate
     // for a CD-rate source, short linear for hi-res)
@@ -370,8 +378,15 @@ function LocalSetupDSDOut() {
     let integ = String(replaceNull(c.DSDIntegrator, 'lin')).replace(/^[ "]+|[ "]+$/g, '').toLowerCase();
     if (!['lin', 'int', 'min', 'nonring'].includes(integ)) integ = 'lin';
     document.querySelectorAll('#dsd-integrator-selector input[type="radio"]').forEach(el => { el.checked = (el.value === integ); });
+    // the decoder and the DSP rate are a DSD file's alone: shown overridden, still editable, while the converter leaves it
+    // untouched (the modulator is the PCM tracks' too)
+    const leave = mode === 'dsd' && dsdSource() === 'untouched';
+    ['control_DSDCutoff', 'control_DSDGain', 'control_DSDOutDSP'].forEach(id => {
+        const r = document.getElementById(id);
+        if (r) r.classList.toggle('sqdsp-overridden', leave);
+    });
     const irow = document.getElementById('control_DSDIntegrator');
-    if (irow) irow.classList.toggle('sqdsp-overridden', dsp !== 'native');
+    if (irow) irow.classList.toggle('sqdsp-overridden', dsp !== 'native' || leave);
     const inote = document.getElementById('note_DSDIntegrator');
     if (inote) {
         inote.textContent = dsp === 'native' ? '' : helpText('DSDNativeOnly_Help');

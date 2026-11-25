@@ -228,7 +228,11 @@ sub clientState {
     my $dspec = $spec ? undef : dsdSpec( $client, $prefs, $out );
     my @up = $spec ? ( 'up=on', "ut=$spec->{f44}.$spec->{f48}", 'uf=' . ( $spec->{filters} =~ tr/,/./r ) )
            : $dspec ? ( 'up=dsd', "udr=$dspec->{dsdrate}", 'dsdp=' . ( $dspec->{native} ? 'native' : $dspec->{f44} ),
-                        'uf=' . ( $dspec->{upfilter} =~ tr/,/./r ) )
+                        'uf=' . ( $dspec->{upfilter} =~ tr/,/./r ),
+                        # a DSD source's choice, when it is not the default (so a player that has not chosen keeps the
+                        # marker, and the rules, it had); .dsf: a player that does not list dff keeps our dff rule
+                        ( $dspec->{dsdsrc} eq 'upsample' ? ()
+                            : 'usd=' . $dspec->{dsdsrc} . ( $dspec->{dsdsrc} eq 'untouched' && !$dspec->{dff} ? '.dsf' : '' ) ) )
            : ( 'up=off' );
     # MP3 at a Bitrate Limiting records the limit, so a new limit rewrites the rules
     my $kbps = mp3Limit( $client, $out );
@@ -251,7 +255,7 @@ sub clientState {
 }
 
 # The Sample Rate Converter to DSD (Upsample 'dsd'; TemplateConfig template_DSFUP; Simon 2026-11-03: "Call upsample
-# Sample Rate Converter and we choose either DSD or PCM here"): every track out as DSD at the player's UpsampleDSDRate.
+# Sample Rate Converter and we choose either DSD or PCM here"): every track out as DSD, PCM at the player's UpsampleDSDRate.
 # A PCM track reaches the engine at its own rate and the engine takes it to 705.6k (TemplateConfig $CONVRATE) itself, with the
 # player's filters (upfilter, Upsample::filters), the DSP there (0.1.72.33; Simon 2026-11-04: "for PCM to DSD we do it on
 # the high rate after resampling before we push it to the SDM"). A DSD track keeps DSD out's DSP rate (dsdOutDSP: DXD
@@ -259,6 +263,8 @@ sub clientState {
 # there (Upsample::dsdFilter, its own defaults). Only where the player can
 # have DSD out (dsdOutTakes: it lists dsf, its output is not a reduced stream) and the stream-start hook is in (it
 # states each stream's length, WavLength.pm); no soxr needed. Else undef: the player plays as with the converter off.
+# A DSD source is the player's choice (dsdsrc, Upsample::dsdSource): to the converter's rate, at its own rate, or untouched
+# (template_DSFUP, applyFormatOrder, dsdUntouched); dff: whether the player lists dff itself.
 sub dsdSpec {
     my ( $client, $prefs, $out ) = @_;
     $prefs ||= {};
@@ -269,7 +275,18 @@ sub dsdSpec {
     my %o = Plugins::SqueezeDSP::Upsample::options( { %$prefs, UpsampleTarget => 'fixed' } );
     my $dsp = dsdOutDSP($prefs);
     return { %o, f44 => $dsp, f48 => $dsp, dsd => 1, upfilter => Plugins::SqueezeDSP::Upsample::filters($prefs),
-             native => dsdNative($prefs) };
+             native => dsdNative($prefs), dsdsrc => Plugins::SqueezeDSP::Upsample::dsdSource($prefs),
+             dff => ( grep { $_ eq 'dff' } nativeFormats($client) ) ? 1 : 0 };
+}
+
+# Whether a track of this type plays untouched on this player (the converter to DSD, its DSD sources untouched): through
+# LMS's own rule, none of ours. Type first, so a PCM track costs no settings read (Gapless::following).
+sub dsdUntouched {
+    my ( $client, $type ) = @_;
+    return 0 unless defined $client && defined $type && $type =~ /^(dsf|dff|wvpx)$/i;
+    my $in = lc $1;
+    return 0 unless clientState($client) =~ /\busd=untouched(\.dsf)?(?:,|$)/;
+    return ( $in eq 'dff' && $1 ) ? 0 : 1;
 }
 
 # DSD out's DSP rate (TemplateConfig template_DSF), the player's DSDOutDSP: DXD, 352.8k, unless it is 176400. Simon
@@ -673,7 +690,9 @@ sub applyFormatOrder {
     # native DSD out: dsf first, so a DSF takes our dsf dsf rule (ahead of LMS's own, which is * *); every other
     # source finds no rule to dsf and goes on to the PCM output. The converter to DSD: dsf first too, where every type
     # has a rule to it (TemplateConfig template_DSFUP)
-    unshift @lead, 'dsf' if $state =~ /\bdsdout=on\b/ || $state =~ /\bup=dsd\b/;
+    # ... and dff after it where DSD sources are untouched, for a player that lists it (usd=untouched, dsdSpec): LMS's own
+    # dff dff rule is the DFF's only untouched route, and covered formats leave the list below
+    unshift @lead, 'dsf', ( $state =~ /\busd=untouched(?:,|$)/ ? 'dff' : () ) if $state =~ /\bdsdout=on\b/ || $state =~ /\bup=dsd\b/;
     my %covered = map { $_ => 1 } coveredFormats();
 
     unless ( $client->can('myFormats') && ref $client->myFormats eq 'ARRAY' ) {
@@ -821,6 +840,9 @@ sub template {
         $opts{upfilter} = $up->{upfilter};
         $opts{dsdp}     = $up->{f44};
         $opts{dsdn}     = $up->{native};
+        # a DSD source at its own rate or untouched (Upsample::dsdSource), and whether the player lists dff
+        $opts{dsdsrc}   = $up->{dsdsrc};
+        $opts{dff}      = $up->{dff};
     }
     my $template = $source->( $up ? 1 : 0, \%opts );
 

@@ -13,6 +13,9 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.62	Fork: with the Sample Rate Converter on DSD, DSD sources per player: Upsample (to the DSD rate, as before),
+				Source rate (its own DSD rate, through the DSP) or Untouched (played as it is, no DSP). DSF files
+				supported; DFF and WavPack DSD files untested.
 	0.1.72.61	Fork: the Filter guide opens (on 0.1.72.60 LMS answered its links with 404 Not Found).
 	0.1.72.60	Fork: the Filter guide: what each SRC filter, DSD filter and modulator does, with its tested
 				figures, linked beside the filters and the modulator on both pages; the DSD routes (Native stays
@@ -314,7 +317,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.61";
+my $revision = "0.1.72.62";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;

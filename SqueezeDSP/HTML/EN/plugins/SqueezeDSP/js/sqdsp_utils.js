@@ -48,7 +48,7 @@ function LocalClearSettings() {
     // the output format, upsampling, DSD decoding, DSD out and Exact track length are how the player is fed, not DSP
     // settings: Reset keeps them
     const keepKeys = ['OutputFormat', 'Upsample', 'UpsamplePCMFilterCD', 'UpsamplePCMFilterHiRes', 'UpsampleTarget', 'UpsampleMax',
-                      'UpsampleDSDRate', 'UpsampleFilterCD', 'UpsampleFilterHiRes', 'DSDCutoff', 'DSDGain', 'DSDOut', 'DSDOutMod', 'DSDOutDSP',
+                      'UpsampleDSDRate', 'UpsampleDSDSource', 'UpsampleFilterCD', 'UpsampleFilterHiRes', 'DSDCutoff', 'DSDGain', 'DSDOut', 'DSDOutMod', 'DSDOutDSP',
                       'DSDIntegrator', 'ExactLength'];
     const kept = {};
     keepKeys.forEach(k => { if (SqueezeDSPData.Client && SqueezeDSPData.Client[k] !== undefined) kept[k] = SqueezeDSPData.Client[k]; });

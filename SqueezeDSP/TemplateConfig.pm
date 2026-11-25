@@ -421,6 +421,13 @@ sub template_DSF {
 #     a DSD source (LMS's own convert.conf writes dsf and dff from it), so the engine takes it to dsdp instead.
 #     Native ($o dsdn, Configuration::dsdNative, the native round): a DSF's DSP at its own DSD rate (--samplerate=native;
 #     the engine decodes at DXD instead where the converter's rate is under the file's); a DFF and WavPack DSD at dsdp.
+#   - A DSD source (dsf, dff, wvpx) is the player's choice ($o dsdsrc, Upsample::dsdSource; Simon 2026-11-24, ledger DSD
+#     SOURCES: THREE CHOICES), PCM as above whichever it is. 'upsample' (the default): to the converter's rate, above.
+#     'source': the same route out at the file's own DSD rate; a DSF as DSD out's rule says it (template_DSF: the engine
+#     reads the rate, --dsdrate=source), a DFF or WavPack DSD, PCM by then, by the rate LMS has of it, filled at stream
+#     start (SQDSPDSD_<the converter's rate>: Upsample::fillDsd). 'untouched': no rule here, so LMS's own takes it (dsf
+#     dsf and dff dff are '-', wvpx dsf unpacks it), a seek included; a DFF keeps its rule for a player that does not
+#     list dff ($o dff), which has no untouched route.
 # The engine's flags go before the DSD flags, which end the command for WavLength to find.
 my $CONVRATE = 705600;
 # a filter's name as the engine reads it (Upsample.pm's @FILTERS, 0.1.72.44: Kaiser, Gaussian, Half-band, Slow, Non-ringing;
@@ -434,16 +441,24 @@ sub template_DSFUP {
 	my $filters = ( $o->{upfilter} // '' ) =~ /^$FILTER,$FILTER$/ ? $o->{upfilter} : 'short-int,short-lin';
 	my $dsdp = ( $o->{dsdp} // '' ) eq '176400' ? 176400 : 352800;
 	my $pcm = " --upsample=$CONVRATE --upfilter=$filters --dsdsource=pcm --dsdoutgain=-6.02";
+	my $src = $o->{dsdsrc} // '';
+	# the end of the command: the converter's rate, or at Source rate a DSD source's own
+	my $end = sub {
+		return $tail unless $src eq 'source' && $_[0] =~ /^(?:dsf|dff|wvpx)$/;
+		return $_[0] eq 'dsf' ? ' --formatout=DSF --dsdrate=source --dsdmax=22579200'
+		                      : " --formatout=DSF --dsdrate=SQDSPDSD_$rate --dsdmax=SQDSPDSD_$rate";
+	};
 	my $text = "\n";
 	for my $input (@INPUTS) {
 		my ( $in, $caps, $command, $kind ) = @$input;
+		next if $src eq 'untouched' && ( $in eq 'dsf' || $in eq 'wvpx' || ( $in eq 'dff' && $o->{dff} ) );
 		if ( ( $kind // '' ) eq 'dxd' ) {
 			my ( $c, $cmd ) = $in eq 'dsf' ? @{ _dsdEngine() } : _input( $input, $o );
 			$cmd =~ s/ --samplerate=\$DXD\$ / --samplerate=native / if $in eq 'dsf' && $o->{dsdn};
-			$text .= _rule( $in, 'dsf', "${c}D", $cmd . $tail );
+			$text .= _rule( $in, 'dsf', "${c}D", $cmd . $end->($in) );
 			next;
 		}
-		$text .= _rule( $in, 'dsf', "${caps}D", $command . ( $in eq 'wvpx' ? " --upsample=$dsdp" : $pcm ) . $tail );
+		$text .= _rule( $in, 'dsf', "${caps}D", $command . ( $in eq 'wvpx' ? " --upsample=$dsdp" : $pcm ) . $end->($in) );
 	}
 	return $text;
 }

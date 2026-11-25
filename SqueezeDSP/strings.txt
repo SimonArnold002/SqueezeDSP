@@ -156,13 +156,28 @@ PLUGIN_SQUEEZEDSP_SRC
 	EN	Sample Rate Converter
 
 PLUGIN_SQUEEZEDSP_SRC_HELP
-	EN	Off: every track goes out as it is, PCM at its own rate and a DSD file as DSD Processing's Output says. PCM: every track, DSD included, goes to the player's top rate, in its own family (Per family) or one rate for all (Player max), up to the Max rate. DSD: every track, PCM included, goes out as DSD at the DSD rate you choose (the highest the player and its DAC take), through the DSP at DSD Processing's DSP rate and our own modulator; only for a player that takes native DSD itself (it lists dsf). PCM and DSD each have their own filters, shown with their options: one for a 44.1 or 48 kHz track, one for hi-res, the engine resampling in 64-bit floating point. Each is a filter, its length and its phase. Kaiser and Gaussian remove every image above the track's band; Half-band, Slow roll-off and Non-ringing let some through, for listening (going down in rate they run as Kaiser short). Phase: linear rings evenly before and after a transient; minimum has no ringing before it; intermediate is in between; Intermediate 80% and 70% sit nearer linear, the top of the band less delayed. Length: short rings for the least time; long keeps more of the top of the band flat.
+	EN	Off: every track goes out as it is, PCM at its own rate and a DSD file as DSD Processing's Output says. PCM: every track, DSD included, goes to the player's top rate, in its own family (Per family) or one rate for all (Player max), up to the Max rate. DSD: every PCM track goes out as DSD at the DSD rate you choose (the highest the player and its DAC take), and a DSD file as DSD sources says, through the DSP at DSD Processing's DSP rate and our own modulator; only for a player that takes native DSD itself (it lists dsf). PCM and DSD each have their own filters, shown with their options: one for a 44.1 or 48 kHz track, one for hi-res, the engine resampling in 64-bit floating point. Each is a filter, its length and its phase. Kaiser and Gaussian remove every image above the track's band; Half-band, Slow roll-off and Non-ringing let some through, for listening (going down in rate they run as Kaiser short). Phase: linear rings evenly before and after a transient; minimum has no ringing before it; intermediate is in between; Intermediate 80% and 70% sit nearer linear, the top of the band less delayed. Length: short rings for the least time; long keeps more of the top of the band flat.
 
 PLUGIN_SQUEEZEDSP_SRC_CONVERT_TO
 	EN	Convert to
 
 PLUGIN_SQUEEZEDSP_SRC_DSD_RATE
 	EN	DSD rate
+
+PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE
+	EN	DSD sources
+
+PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_HELP
+	EN	Upsample: a DSD file goes to the DSD rate above, through the DSP. Source rate: it keeps its own DSD rate, through the DSP. Untouched: it plays as it is, with no DSP. Fully supported for DSF files; DFF and WavPack DSD files are untested.
+
+PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP
+	EN	Upsample
+
+PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN
+	EN	Source rate
+
+PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE
+	EN	Untouched
 
 PLUGIN_SQUEEZEDSP_SRC_FILTER_CD
 	EN	Filter, 44.1/48 kHz sources

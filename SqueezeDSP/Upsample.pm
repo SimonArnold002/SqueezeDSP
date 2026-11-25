@@ -45,12 +45,21 @@ my @MAXRATES = ( 768000, 384000, 192000, 96000 );
 
 my @TARGETS = qw(family fixed);
 
-# The Sample Rate Converter's DSD rates (Upsample 'dsd': every track to DSD, TemplateConfig template_DSFUP), the
+# The Sample Rate Converter's DSD rates (Upsample 'dsd': to DSD, TemplateConfig template_DSFUP), the
 # player's UpsampleDSDRate; DSD64 by default, the rate every DSD DAC takes. No player reports the DSD rates it takes
 # (LMS reads only its MaxSampleRate and its formats), so it is the user's choice (Simon 2026-11-03: "purely a user
 # choice based on what the dac and player can handle").
 my @DSDRATES = ( 2822400, 5644800, 11289600, 22579200 );
 use constant DEFAULT_DSDRATE => 2822400;
+
+# What the converter to DSD does with a DSD source (a DSF, a DFF, WavPack DSD: wvpx), the player's UpsampleDSDSource
+# (Simon 2026-11-24: "Its a choice a user needs to make", ledger DSD SOURCES: THREE CHOICES): 'upsample' to the converter's
+# DSD rate (the default, as before), 'source' its own DSD rate with the DSP, 'untouched' LMS's own route as if the DSP
+# were off. PCM goes to the converter's rate whichever it is.
+my @DSDSOURCES = qw(upsample source untouched);
+# a DSD source's own rate where the engine reads PCM and cannot see it (a DFF, WavPack DSD): SQDSPDSD_<the converter's
+# rate> in the rule, filled at stream start (fillDsd)
+use constant DSDPLACEHOLDER => 'SQDSPDSD_';
 
 # The engine's filters (gipsyUpsampler): a track reaches the engine at its own rate and the engine resamples it itself,
 # for the converter to DSD to 705.6k (0.1.72.33: TemplateConfig $CONVRATE; Simon 2026-11-04: "for PCM to DSD we do it on
@@ -165,8 +174,25 @@ sub options {
     return ( target => $t, max => $m, dsdrate => $d );
 }
 
+# What the converter to DSD does with a DSD source: one of @DSDSOURCES (any case, spaces and quotes trimmed), else upsample
+sub dsdSource {
+    my $v = lc( ( shift || {} )->{UpsampleDSDSource} // '' );
+    $v =~ s/^[ "]+|[ "]+$//g;
+    return ( grep { $_ eq $v } @DSDSOURCES ) ? $v : 'upsample';
+}
+
+# A rule's DSDPLACEHOLDER filled with the track's own DSD rate ($src, LMS's view of its rate), or, when LMS has none of
+# the DSD rates for it, with the converter's, which the placeholder carries
+sub fillDsd {
+    my ( $command, $src ) = @_;
+    my $own = ( defined $src && "$src" =~ /^\d+$/ && grep { $_ == $src } @DSDRATES ) ? 0 + $src : 0;
+    $command =~ s/SQDSPDSD_(\d+)/$own || $1/ge;
+    return $command;
+}
+
 # The Sample Rate Converter's mode, from the player's Upsample (Simon 2026-11-03: "we choose either DSD or PCM here"):
-# 'on' is PCM (every track to its PCM target, as before), 'dsd' every track to DSD at the DSD rate, anything else off
+# 'on' is PCM (every track to its PCM target, as before), 'dsd' every PCM track to DSD at the DSD rate and a DSD one as
+# dsdSource says, anything else off
 # (each track goes out as it is: PCM at its own rate, a DSF as the player's DSD output says, Configuration::dsdOut)
 sub mode {
     my $v = lc( ( shift || {} )->{Upsample} // '' );
@@ -257,6 +283,19 @@ sub _tokenize {
         }
         else {
             $command =~ s/SQDSPUP_(\d+)_\d+/$1/g;
+        }
+    }
+
+    # the converter to DSD's Source rate, for a DSD source the engine reads as PCM: the track's own DSD rate; on any error
+    # the converter's, so the engine never gets the placeholder
+    if ( defined $command && index( $command, DSDPLACEHOLDER ) >= 0 ) {
+        my $src = eval { $_[0]->{sampleRate} };
+        my $out = eval { fillDsd( $command, $src ) };
+        if ( defined $out && index( $out, DSDPLACEHOLDER ) < 0 ) {
+            $command = $out;
+        }
+        else {
+            $command =~ s/SQDSPDSD_(\d+)/$1/g;
         }
     }
 
