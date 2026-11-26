@@ -242,13 +242,19 @@
     }
 
     // ---------------------------------------------------------------- loading
+    // the players by name (Simon 2026-11-25: "players in our UIs alphabetical order as they seem random"): LMS answers
+    // `players` unsorted, in a Perl hash's order (Slim::Player::Client::clients = values %clientHash); any case, numbers as
+    // numbers (Kitchen 9 before Kitchen 10), the id last so two of one name keep one order
+    function byName(a, b) {
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    }
     function loadPlayers() {
         return rpc('', ['players', 0, 100]).then(function (r) {
             PLAYERS = (r.players_loop || []).filter(function (p) {
                 return p.playerid && (p.isplayer === undefined || num(p.isplayer, 1) !== 0);
             }).map(function (p) {
                 return { id: String(p.playerid), name: p.name || String(p.playerid), connected: num(p.connected, 1) === 1 };
-            });
+            }).sort(byName);
             var keep = find(PID);
             if (!keep) { select(wanted(), false); } else { renderPick(); }
             if (!PID) { build(); }
@@ -461,6 +467,77 @@
         });
     }
 
+    // Apply: what waits goes into the file and the file is saved; resolves true once saved (or nothing waited), false
+    // when the save failed (its error on the page). Every Save button (saveRow), and the page's ways out before leaving.
+    function applyPending() {
+        var c = client();
+        if (!c || !dirty()) { return Promise.resolve(true); }
+        var was = clone(PENDING), pid = PID;
+        Object.keys(PENDING).forEach(function (k) { setPath(c, k, clone(PENDING[k])); });
+        PENDING = {};
+        GEN++;
+        renderControls();
+        return save().then(function (ok) {
+            // not saved (Simon 2026-11-25: users must be told settings will be lost): they wait again, said so, with Save
+            // now to try again; one changed since keeps its newer value; another player picked meanwhile: not its settings
+            if (!ok && PID === pid) {
+                Object.keys(was).forEach(function (k) { if (!has(PENDING, k)) { PENDING[k] = was[k]; } });
+                GEN++;
+                renderControls();
+            }
+            return ok;
+        });
+    }
+
+    // The page's own question (Simon 2026-11-25: "the UI needs to feedback and say settings will be lost or save now"):
+    // drawn on the page, as its help is, since the browser's own shows nothing in LyrPlay. Resolves with the value of the
+    // button pressed; Escape or a press beside the box is the last one (Cancel).
+    function ask(text, choices) {
+        return new Promise(function (resolve) {
+            var back = document.body.appendChild(make('div', 'askback'));
+            var box = back.appendChild(make('div', 'askbox'));
+            box.setAttribute('role', 'alertdialog');
+            box.setAttribute('aria-modal', 'true');
+            box.appendChild(make('p', 'askmsg', text));
+            var row = box.appendChild(make('div', 'askbtns'));
+            var last = choices[choices.length - 1][0];
+            function key(e) { if (e.key === 'Escape') { e.preventDefault(); done(last); } }
+            function done(v) {
+                document.removeEventListener('keydown', key, true);
+                if (back.parentNode) { back.parentNode.removeChild(back); }
+                resolve(v);
+            }
+            choices.forEach(function (c, i) {
+                var b = row.appendChild(make('button', 'btn ' + (c[2] || (i === 0 ? 'primary' : '')), c[1]));
+                b.type = 'button';
+                b.dataset.v = c[0];
+                b.addEventListener('click', function () { done(c[0]); });
+            });
+            back.addEventListener('click', function (e) { if (e.target === back) { done(last); } });
+            document.addEventListener('keydown', key, true);
+            row.firstChild.focus();
+        });
+    }
+
+    // Leaving the page by one of its own ways out (the filter guide in Material's frame, Classic interface, Back) with
+    // settings not saved: asked first, Save (red, as the rows' own) / Don't save / Cancel. go() runs at once when nothing waits, once saved,
+    // or on Don't save; Cancel, or a save that failed (its error on the page), stays. LEAVING: a leave already answered,
+    // so the browser's own question (beforeunload, below) is not asked on top.
+    var LEAVING = false, ASKING = false;
+    function leaveGuard(go) {
+        if (ASKING) { return; }
+        if (!dirty()) { go(); return; }
+        ASKING = true;
+        ask(L.leaveAsk || 'Your settings are not saved and will be lost.',
+            [['save', L.apply || 'Save', 'save'], ['lose', L.dontSave || "Don't save"], ['cancel', L.cancel || 'Cancel']]).then(function (v) {
+            if (v === 'save') {
+                return applyPending().then(function (ok) { ASKING = false; if (ok) { go(); } });
+            }
+            ASKING = false;
+            if (v === 'lose') { LEAVING = true; go(); }
+        });
+    }
+
     // a switch or a choice: saved at once (key: its settings path); what waits for Apply under that path goes
     function change(key, value) {
         var c = client();
@@ -503,24 +580,14 @@
         // "Exact track length" (the player's own, Simon 2026-11-15): beside the DSP switch, dimmed while the DSP is off
         UI.exact = control(db, 'exact', L.exact || 'Exact track length', L.exactHelp);
         UI.exactSw = UI.exact.c.appendChild(switchButton(function (on) { change('ExactLength', on ? 1 : 0); }));
-        // Reset and Apply, on every tab (the classic page's pair beside its DSP switch): Reset puts every DSP setting back
-        // to a new player's and waits for Apply, as there; Apply shows while anything waits, whichever tab holds it
+        // Reset, on every tab (the classic page's, beside its DSP switch): every DSP setting back to a new player's,
+        // waiting for Save as there; its Save beside it for what no tab's own Save holds (saveRow, below)
         var acts = db.appendChild(make('div', 'dspacts'));
         UI.reset = acts.appendChild(make('button', 'btn danger', L.reset || 'Reset'));
         UI.reset.type = 'button';
         UI.reset.addEventListener('click', resetAll);
-        var ar = acts.appendChild(make('div', 'applyrow'));
-        UI.apply = ar.appendChild(make('button', 'btn primary', L.apply || 'Apply'));
-        UI.apply.type = 'button';
-        UI.apply.addEventListener('click', function () {
-            var c = client();
-            if (!c || !dirty()) { return; }
-            Object.keys(PENDING).forEach(function (k) { setPath(c, k, clone(PENDING[k])); });
-            PENDING = {};
-            GEN++;
-            renderControls();
-            save();
-        });
+        UI.saveRows = {};
+        saveRow(acts, 'top');
         app.appendChild(db);
 
         // the signal path, and its speed as the headline
@@ -641,6 +708,7 @@
         UI.loud.row.classList.add('sw-row');
         UI.loudOpts = cc.appendChild(make('div', 'opts'));
         slider(UI.loudOpts, 'Loudness.listening_level', L.loudLevel || 'Listening Level', L.loudLevelHelp, 50, 85, 0.1, '', 85, false, true);
+        saveRow(cc, 'dsp');
 
         // Sample Rate Converter: off, PCM (its target and max rate) or DSD (its rate)
         var sc = pane('src', L.src || 'Sample Rate Converter', L.srcHelp);
@@ -672,6 +740,10 @@
         UI.dsdSrcSeg = segment(UI.dsdSrc.c, [['upsample', L.dsdSourceUp || 'Upsample'], ['source', L.dsdSourceOwn || 'Source rate'],
                                              ['untouched', L.dsdSourceLeave || 'Untouched']],
                                function (v) { change('UpsampleDSDSource', v); });
+        // what each does, on its own button (Simon 2026-11-25); the row's help keeps the DSF caveat
+        tip(UI.dsdSrcSeg.upsample, L.dsdSourceUpHelp);
+        tip(UI.dsdSrcSeg.source, L.dsdSourceOwnHelp);
+        tip(UI.dsdSrcSeg.untouched, L.dsdSourceLeaveHelp);
         // its filters: the engine takes every PCM track to 705.6k itself, by the one for the track's rate
         filterGroups(UI.dsdOpts, [['UpsampleFilterCD', L.filterCd || 'Filter, 44.1/48 kHz sources'],
                                   ['UpsampleFilterHiRes', L.filterHiRes || 'Filter, hi-res sources']], true);
@@ -737,6 +809,7 @@
         UI.addBtn.type = 'button';
         UI.addBtn.addEventListener('click', addBand);
         UI.bands = pq.appendChild(make('div', 'bands'));
+        saveRow(pq, 'peq');   // under the bands; an import's bands wait here too
         pq.appendChild(make('div', 'grp', L.importFilters || 'Import Filters'));
         UI.drop = pq.appendChild(make('div', 'drop'));
         UI.drop.appendChild(make('span', 'drop-t', L.dropZone || 'Drop a REW or FIR WAV file here'));
@@ -786,6 +859,7 @@
         UI.firSel.setAttribute('aria-label', noColon(L.firFile || 'Load FIR File'));
         UI.firSel.addEventListener('change', function () { change('FIRWavFile', UI.firSel.value); });
         slider(cv, 'FIRStrength', L.firStrength || 'FIR Strength', L.firStrengthHelp, 0, 100, 1, '', 100, false);
+        saveRow(cv, 'conv');
 
         // Crossfeed (the classic page's): saves at once
         var xf = pane('xfeed', L.tabXfeed || 'Crossfeed', L.crossfeedHelp);
@@ -836,13 +910,30 @@
     }
 
     // the filter guide (filters.html, 0.1.72.59; Simon 2026-11-23): a plain link beside the choice, at the part it is
-    // about ('src', 'mod'), in a new tab as the support links are; the version in its address, as the page's own files
+    // about ('src', 'mod'); the version in its address, as the page's own files. Framed, in the frame (Simon 2026-11-25:
+    // "It should just open in its iframe"): Material's dialog takes a plain link's click into its own frame and its back
+    // arrow returns here, so a new tab there opened a second window as well. A new tab only when the page has the window.
+    // Framed with settings not saved (Simon 2026-11-25: "when moving to guide ... ask user to save before moving"): the
+    // click waits, Material's handler too, for the page's question (leaveGuard); answered, the same click again, which
+    // Material and the browser then take. Standalone the guide is a new tab and the page stays: nothing is asked.
     function guideLink(parent, part) {
         var a = parent.appendChild(make('a', 'guide', L.filterGuide || 'Filter guide'));
         a.href = '/plugins/SqueezeDSP/filters.html?v=' + encodeURIComponent(CFG.version || '') + '#' + part;
-        a.target = '_blank';
+        if (!inFrame()) { a.target = '_blank'; }
         a.rel = 'noopener';
+        a.addEventListener('click', function (e) {
+            if (a.dataset.go) { delete a.dataset.go; return; }   // the click sent once answered: let it through
+            if (!inFrame() || (!dirty() && !ASKING)) { return; }
+            e.preventDefault();
+            e.stopPropagation();   // Material listens on the document: it waits for the answer as well
+            leaveGuard(function () { if (a.isConnected) { a.dataset.go = '1'; a.click(); } });
+        });
         return a;
+    }
+
+    // inside another page's frame (Material's dialog); a frame of another origin throws on window.top: framed too
+    function inFrame() {
+        try { return window.top !== window.self; } catch (e) { return true; }
     }
 
     function familyName(f) {
@@ -1240,12 +1331,45 @@
         }
         Object.keys(UI.sliders).forEach(function (k) { shown(UI.sliders[k], k); });
         Object.keys(UI.numbers).forEach(function (k) { shown(UI.numbers[k], k); });
-        UI.apply.disabled = !dirty();
-        UI.apply.parentNode.classList.toggle('hide', !dirty());
+        renderSave();
     }
 
-    // Reset (the classic page's LocalClearSettings): every DSP setting back to a new player's, waiting for Apply as
-    // there; how the player is fed kept (RESET_KEEP); the DSP left on
+    // Save beside what waits (Simon 2026-11-25: "put the apply button/ or call it Save in Red if it needs saving, next to
+    // the areas that it applies to rather than at top the others all save with buttons"): a row at the foot of each tab
+    // whose controls wait (DSP, PEQ under its bands, Convolution), and one beside Reset for what Reset left waiting that
+    // no tab's row holds; each shown, red, only while one of its own settings waits, and each saves all that waits
+    function saveRow(parent, area) {
+        var r = parent.appendChild(make('div', 'applyrow hide'));
+        r.dataset.area = area;
+        // said plainly (Simon 2026-11-25: "say settings will be lost or save now")
+        r.appendChild(make('span', 'unsaved', L.unsaved || 'Not saved: settings will be lost unless you save now.'));
+        var b = r.appendChild(make('button', 'btn save', L.apply || 'Save'));
+        b.type = 'button';
+        b.disabled = true;
+        b.addEventListener('click', function () { applyPending(); });
+        UI.saveRows[area] = r;
+        return r;
+    }
+    // the row a waiting setting shows in: the tab holding its control (the bands: PEQ's); else beside Reset
+    function areaOf(k) {
+        if (k === 'Filters') { return 'peq'; }
+        var s = UI.sliders[k] || UI.numbers[k];
+        var p = s ? s.ctl.row.closest('.tabpane') : null;
+        return p && UI.saveRows[p.dataset.t] ? p.dataset.t : 'top';
+    }
+    function renderSave() {
+        var want = {};
+        Object.keys(PENDING).forEach(function (k) { want[areaOf(k)] = true; });
+        Object.keys(UI.saveRows).forEach(function (a) {
+            UI.saveRows[a].classList.toggle('hide', !want[a]);
+            UI.saveRows[a].lastChild.disabled = !want[a];
+        });
+    }
+
+    // Reset (the classic page's LocalClearSettings): every DSP setting back to a new player's, SAVED AT ONCE (Simon
+    // 2026-11-25: "reset should reset it should not need a save"); how the player is fed kept (RESET_KEEP); the DSP left
+    // on. Whatever else waited goes in the same save; a save that fails leaves it all waiting (applyPending), Save beside
+    // Reset for what no tab holds
     function resetAll() {
         if (!client()) { return; }
         var d = defaults();
@@ -1260,7 +1384,7 @@
             }
         });
         BAND = null;
-        renderControls();
+        applyPending();
     }
 
     // Clear Log (the classic page's): the engine's log emptied, every player's; the peaks read again
@@ -1448,7 +1572,7 @@
             UI.bandSig = JSON.stringify(list);    // its rows already show it: no rebuild
             BAND = i;
             show(v);
-            renderSliders();                      // Apply shows
+            renderSliders();                      // PEQ's Save shows
             renderPEQ();
         }
         range.addEventListener('input', function () { set(log ? posToFreq(range.value) : range.value); });
@@ -1924,16 +2048,18 @@
     // Back to Material: only when standalone. Framed, Material's own dialog has its close, and
     // the only way out of a frame (window.top.location) would throw the whole app away.
     var back = $('back');
-    var framed = false;
-    try { framed = window.top !== window.self; } catch (e) { framed = true; }
+    var framed = inFrame();
     if (back) {
         if (framed) {
             back.parentNode.removeChild(back);
         } else {
             back.textContent = L.back || 'Back';
+            // settings not saved: asked first (leaveGuard)
             back.addEventListener('click', function () {
-                window.close();
-                setTimeout(function () { window.location.href = '/material/'; }, 80);
+                leaveGuard(function () {
+                    window.close();
+                    setTimeout(function () { window.location.href = '/material/'; }, 80);
+                });
             });
         }
     }
@@ -1944,19 +2070,30 @@
     var toClassicBtn = $('classic');
     if (toClassicBtn) {
         toClassicBtn.textContent = L.classicUi || 'Classic interface';
+        // settings not saved: asked first (leaveGuard); the switch refused, the page stays and asks again next time
         toClassicBtn.addEventListener('click', function () {
-            toClassicBtn.disabled = true;
-            rpc('', ['squeezedsp.interface', 'set:classic']).then(function () {
-                var base = '/';
-                try { if (framed && /^\/material(\/|$)/.test(window.top.location.pathname)) { base = '/material/'; } } catch (e) {}
-                window.location.replace(base + 'plugins/SqueezeDSP/index.html' + (PID ? '?player=' + encodeURIComponent(PID) : ''));
-            }, function (e) {
-                toClassicBtn.disabled = false;
-                var el = $('err');
-                if (el) { el.textContent = e.message; }
+            leaveGuard(function () {
+                toClassicBtn.disabled = true;
+                rpc('', ['squeezedsp.interface', 'set:classic']).then(function () {
+                    var base = '/';
+                    try { if (framed && /^\/material(\/|$)/.test(window.top.location.pathname)) { base = '/material/'; } } catch (e) {}
+                    window.location.replace(base + 'plugins/SqueezeDSP/index.html' + (PID ? '?player=' + encodeURIComponent(PID) : ''));
+                }, function (e) {
+                    LEAVING = false;
+                    toClassicBtn.disabled = false;
+                    var el = $('err');
+                    if (el) { el.textContent = e.message; }
+                });
             });
         });
     }
+    // any other way out with settings not saved (Material's back arrow, a reload, the window closed): the browser's own
+    // question, as the classic page asks (its handleUnsavedChanges). Material's close and Home remove the frame unasked.
+    window.addEventListener('beforeunload', function (e) {
+        if (!dirty() || LEAVING) { return; }
+        e.preventDefault();
+        e.returnValue = '';
+    });
     window.addEventListener('resize', function () { drawGraphSoon(); });
 
     tipStart();

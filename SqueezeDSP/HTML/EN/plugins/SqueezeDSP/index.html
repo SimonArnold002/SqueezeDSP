@@ -115,14 +115,10 @@ print ( $myversion );
                 </div>
                 <button class="sqdsp-click button button-red" type="button"
                         id="btn_ClearAll" value="Reset" style="margin-left: auto;"
-                        onclick="LocalClearSettings(); outputlist('');">Reset</button>
+                        onclick="LocalResetSettings(); outputlist('');">Reset</button>
             </div>
         </TD>
-        <TD class="rowSuffix">
-            <button class="sqdsp-click button button-blue" type="button"
-                    id="btn_Apply" value="Apply"
-                    onclick="SqueezeDSPSaveAll(); DisplayAlert('All Settings', 'Applied', 2000);">Apply</button>
-        </TD>
+        <TD class="rowSuffix"></TD>
     </TR>
     <!-- Exact track length: the player's own (Simon 2026-11-15), dimmed while the DSP is off (LocalSetupDspOff) -->
     <TR id="control_ExactLength" class="row-header">
@@ -143,6 +139,15 @@ print ( $myversion );
             </div>
         </TD>
         <TD class="rowSuffix"></TD>
+    </TR>
+    <!-- Save beside what it saves (Simon 2026-11-25: "change the classic it needs to follow suit"): no Apply here; a save
+         that failed says so beside Reset, its Save taking everything the page shows (sqdsp_data.js) -->
+    <TR id="control_SaveTop" class="sqdsp-saverow" data-area="top" style="display: none;">
+        <TD class="rowBody sqdsp-savecell" colspan="3">
+            <span class="sqdsp-unsaved">[% "PLUGIN_SQUEEZEDSP_LIVE_UNSAVED" | string %]</span>
+            <button class="sqdsp-click button sqdsp-save" type="button" disabled
+                    onclick="SqueezeDSPSaveAll();">[% "PLUGIN_SQUEEZEDSP_LIVE_APPLY" | string %]</button>
+        </TD>
     </TR>
 </TABLE>
 
@@ -183,7 +188,7 @@ print ( $myversion );
         </TD>
     </TR>
     <!-- the engine's debug log, every player's (Simon 2026-11-20: a switch here, not a hand edit of the engine's config):
-         saved at once, outside Apply (squeezedsp.debuglog) -->
+         saved at once (squeezedsp.debuglog) -->
     <TR id="control_DebugLog" class="row-header">
         <TD class="rowTitle">
             <div class="tooltip">
@@ -517,6 +522,12 @@ print ( $myversion );
         </TD>
     </TR>
 </TABLE>
+<!-- the DSP tab's sliders and gains wait for this Save (sqdsp_data.js) -->
+<div class="sqdsp-saverow" data-area="dsp" style="display: none;">
+    <span class="sqdsp-unsaved">[% "PLUGIN_SQUEEZEDSP_LIVE_UNSAVED" | string %]</span>
+    <button class="sqdsp-click button sqdsp-save" type="button" disabled
+            onclick="SqueezeDSPSaveAll();">[% "PLUGIN_SQUEEZEDSP_LIVE_APPLY" | string %]</button>
+</div>
 </DIV>
 <DIV class="sqdsp-pane" id="pane_src" data-dsp="1" style="display: none;">
 <TABLE class="table-container">
@@ -642,7 +653,7 @@ print ( $myversion );
             <select class="sqdsp-select sqdsp-filter" id="upsample-pcm-filter-cd-selector"
                     onchange="NewFieldValue('UpsamplePCMFilterCD', this, false); LocalSetupUpsample();"></select>
         </TD>
-        <!-- the filter guide (0.1.72.59), in a new tab -->
+        <!-- the filter guide (0.1.72.59), in a new tab; framed, in the frame (the start-up script) -->
         <TD class="rowSuffix"><a class="sqdsp-guide" href="/plugins/SqueezeDSP/filters.html?v=[% cacheBust %]#src" target="_blank" rel="noopener">[% "PLUGIN_SQUEEZEDSP_FILTER_GUIDE" | string %]</a></TD>
     </TR>
     <TR id="control_UpsamplePCMFilterHiRes" class="sqdsp-src-pcm">
@@ -705,6 +716,7 @@ print ( $myversion );
                                onchange="NewFieldValue('UpsampleDSDSource', this, false); LocalSetupAll();">
                         <span>[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP" | string %]</span>
                     </label>
+                    <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP_HELP" | string %]</span>
                 </div>
                 <div class="filter-type-container">
                     <label class="filter-type">
@@ -712,6 +724,7 @@ print ( $myversion );
                                onchange="NewFieldValue('UpsampleDSDSource', this, false); LocalSetupAll();">
                         <span>[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN" | string %]</span>
                     </label>
+                    <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN_HELP" | string %]</span>
                 </div>
                 <div class="filter-type-container">
                     <label class="filter-type">
@@ -719,6 +732,7 @@ print ( $myversion );
                                onchange="NewFieldValue('UpsampleDSDSource', this, false); LocalSetupAll();">
                         <span>[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE" | string %]</span>
                     </label>
+                    <span class="tooltiptext">[% "PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE_HELP" | string %]</span>
                 </div>
             </div>
         </TD>
@@ -731,7 +745,7 @@ print ( $myversion );
             <select class="sqdsp-select sqdsp-filter" id="upsample-filter-cd-selector"
                     onchange="NewFieldValue('UpsampleFilterCD', this, false); LocalSetupUpsample();"></select>
         </TD>
-        <!-- the filter guide (0.1.72.59), in a new tab -->
+        <!-- the filter guide (0.1.72.59), in a new tab; framed, in the frame (the start-up script) -->
         <TD class="rowSuffix"><a class="sqdsp-guide" href="/plugins/SqueezeDSP/filters.html?v=[% cacheBust %]#src" target="_blank" rel="noopener">[% "PLUGIN_SQUEEZEDSP_FILTER_GUIDE" | string %]</a></TD>
     </TR>
     <TR id="control_UpsampleFilterHiRes" class="sqdsp-src-dsd">
@@ -973,7 +987,7 @@ print ( $myversion );
                 </div>
             </div>
         </TD>
-        <!-- the filter guide (0.1.72.59), in a new tab -->
+        <!-- the filter guide (0.1.72.59), in a new tab; framed, in the frame (the start-up script) -->
         <TD class="rowSuffix"><a class="sqdsp-guide" href="/plugins/SqueezeDSP/filters.html?v=[% cacheBust %]#mod" target="_blank" rel="noopener">[% "PLUGIN_SQUEEZEDSP_FILTER_GUIDE" | string %]</a></TD>
     </TR>
     <TR id="control_DSDOutDSP">
@@ -1059,6 +1073,12 @@ print ( $myversion );
 
 <div id="peqContainer">
     <!-- PEQ bands injected here -->
+</div>
+<!-- the bands (and an import's) wait for this Save (sqdsp_data.js) -->
+<div class="sqdsp-saverow" data-area="peq" style="display: none;">
+    <span class="sqdsp-unsaved">[% "PLUGIN_SQUEEZEDSP_LIVE_UNSAVED" | string %]</span>
+    <button class="sqdsp-click button sqdsp-save" type="button" disabled
+            onclick="SqueezeDSPSaveAll();">[% "PLUGIN_SQUEEZEDSP_LIVE_APPLY" | string %]</button>
 </div>
 <TABLE class="table-container">
     <TR class="row-header" id="hdr_external">
@@ -1159,6 +1179,12 @@ print ( $myversion );
         </TD>
     </TR>
 </TABLE>
+<!-- FIR Strength waits for this Save (sqdsp_data.js) -->
+<div class="sqdsp-saverow" data-area="conv" style="display: none;">
+    <span class="sqdsp-unsaved">[% "PLUGIN_SQUEEZEDSP_LIVE_UNSAVED" | string %]</span>
+    <button class="sqdsp-click button sqdsp-save" type="button" disabled
+            onclick="SqueezeDSPSaveAll();">[% "PLUGIN_SQUEEZEDSP_LIVE_APPLY" | string %]</button>
+</div>
 </DIV>
 <DIV class="sqdsp-pane" id="pane_xfeed" data-dsp="1" style="display: none;">
 <TABLE class="table-container">
@@ -1237,16 +1263,13 @@ print ( $myversion );
 </DIV>
 
 
-<!-- Ko-fi float -->
-<div id="kofi-float" style="position:fixed; bottom:12px; right:12px; opacity:0.75; z-index:999;"
-     onmouseover="this.style.opacity='1'"
-     onmouseout="this.style.opacity='0.75'">
-    <script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script>
-    <script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#72a4f2', 'Y8Y31UOE3D'); kofiwidget2.draw();</script>
-    <!-- Simon's, beside Fox's (Simon 2026-11-20) -->
-    <a href="https://buymeacoffee.com/crystalgipsy" target="_blank" rel="noopener" class="sqdsp-bmc"
-       style="display:block; margin-top:6px; padding:6px 12px; border-radius:6px; background:#ffdd00; color:#000; font-weight:600;
-              text-align:center; text-decoration:none; font-family:inherit;">Buy me a coffee</a>
+<!-- SUPPORT (Simon 2026-11-26: "the links to ko-fi and buyme a coffee stop you seeing or interacting can we have those at
+     bottom like the new interface below all the controls rather than as they are currently and float?"): Fox's Ko-fi and
+     Simon's Buy Me a Coffee as plain links under everything, as on the SqueezeDSP page. Fox's floating widget (its script
+     from storage.ko-fi.com) lay over the controls, on a phone over the note and Save -->
+<div class="sqdsp-support">
+    <a class="sqdsp-supportlink" href="https://ko-fi.com/Y8Y31UOE3D" target="_blank" rel="noopener">Ko-fi (Foxenfurter)</a>
+    <a class="sqdsp-supportlink" href="https://buymeacoffee.com/crystalgipsy" target="_blank" rel="noopener">Buy me a coffee (CrystalGipsy)</a>
 </div>
 
 [% END %]
@@ -1276,8 +1299,8 @@ function handleFileSelection(event) {
 }
 
 function handleUnsavedChanges(event) {
-    var applyButton = document.getElementById('btn_Apply');
-    if (applyButton && applyButton.classList.contains('button-amber')) {
+    // anything waiting for a Save (sqdsp_data.js)
+    if (typeof sqdspWaiting === 'function' && sqdspWaiting()) {
         event.preventDefault();
         event.returnValue = 'You have unsaved changes. Press Leave to exit and Cancel to go back.';
         return event.returnValue;
@@ -1306,6 +1329,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var graphContainer = document.getElementById('peqGraphContainer');
     if (graphContainer) _graphObserver.observe(graphContainer);
+
+    // the filter guide's links: framed, in the frame (Simon 2026-11-25: "It should just open in its iframe"). Material's
+    // dialog takes a plain link's click into its own frame and its back arrow returns here, so a new tab there opened a
+    // second window as well. A new tab only when the page has the window; a frame of another origin throws: framed too.
+    var framed = true;
+    try { framed = window.top !== window.self; } catch (e) {}
+    if (framed) {
+        Array.prototype.forEach.call(document.querySelectorAll('a.sqdsp-guide'), function (a) { a.removeAttribute('target'); });
+    }
 
     window.addEventListener('beforeunload', handleUnsavedChanges);
 });

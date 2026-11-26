@@ -1577,9 +1577,29 @@ input[type="button"] {
 
   /* a hidden tooltip still takes room and pushes the page sideways: none until shown */
   .tooltip .tooltiptext,
-  .filter-type-container .tooltiptext { display: none; max-width: calc(100vw - 48px); box-sizing: border-box; }
+  .filter-type-container .tooltiptext { display: none; max-width: calc(100vw - 64px); box-sizing: border-box; }
   .tooltip:hover .tooltiptext,
   .filter-type-container:hover .tooltiptext { display: block; }
+}
+
+/* the clipping lamps' boxes (Simon 2026-11-26, "yes fix it", twice). Each box under its own lamp, from just left of it
+   rightwards, its arrow near its left end pointing up at the lamp: above it, as Fox had it, the ~186 px box started past
+   the page's top (the Clipping row sits ~170 px down) and its first line was cut off; centred on its lamp, the first
+   lamps' started past the page's left side below ~830 px */
+#hdr_clipping .led-container .tooltiptext { bottom: auto; top: 100%; margin-bottom: 0; margin-top: 10px; left: -20px; transform: none; }
+#hdr_clipping .led-container .tooltiptext::after { top: auto; bottom: 100%; left: 32px; border-color: transparent transparent #64b5f6 transparent !important; }
+/* on a phone or a narrow window (the page slid sideways): each 334 px box, centred on its lamp and laid out while hidden,
+   reached past both edges (the first lamps' cut off at the left, the last ones' widening the page): none until shown,
+   then under the Clipping row and as wide as it, whatever the fonts (Material sets its own); no arrow (it would point
+   at the row, not the lamp) */
+@media (max-width: 768px) {
+  #hdr_clipping { position: relative; }
+  #hdr_clipping .rowBody,
+  #hdr_clipping .led-container { position: static; }
+  #hdr_clipping .led-container .tooltiptext { display: none; left: 0; right: 0; top: 100%; bottom: auto; width: auto; transform: none;
+                                              margin: 2px 0 0; box-sizing: border-box; }
+  #hdr_clipping .led-container:hover .tooltiptext { display: block; }
+  #hdr_clipping .led-container .tooltiptext::after { display: none; }
 }
 
 /* The tabs (Simon 2026-11-03, the SqueezeDSP page's): the page's own choice buttons in one row that wraps, one pane
@@ -1614,3 +1634,24 @@ tr.sqdsp-overridden > td.rowTitle, tr.sqdsp-overridden > td.rowBody { opacity: 0
 .sqdsp-guide { color: RoyalBlue; font-size: 12px; white-space: nowrap; text-decoration: none; }
 .sqdsp-guide:hover, .sqdsp-guide:focus-visible { text-decoration: underline; }
 @media (prefers-color-scheme: dark) { .sqdsp-guide { color: #82b1ff; } }
+
+/* Save beside what it saves (Simon 2026-11-25: "call it Save in Red if it needs saving, next to the areas that it applies
+   to"; the classic page "needs to follow suit"): a tab's row at its foot (DSP, PEQ under the bands, Convolution), and beside
+   Reset after a save that failed; only ever shown while something waits (sqdsp_data.js LocalRenderSave). The SqueezeDSP
+   page's red: filled #c62828, white text; the note in its red for each theme */
+div.sqdsp-saverow { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px;
+                    margin: 6px 0 4px 0; padding: 8px 4px 0 4px; border-top: 1px solid rgba(128, 128, 128, 0.35); }
+td.sqdsp-savecell { text-align: right; }
+td.sqdsp-savecell .sqdsp-unsaved { margin-right: 10px; }
+.sqdsp-unsaved { color: #c62828; font-weight: 600; font-size: 0.92em; }
+@media (prefers-color-scheme: dark) { .sqdsp-unsaved { color: #ef9a9a; } }
+.button.sqdsp-save { background-color: #c62828 !important; color: #fff !important; border: 2px solid #c62828 !important; font-weight: 600; }
+.button.sqdsp-save:hover { background-color: #b71c1c !important; border-color: #b71c1c !important; }
+
+/* the support links under everything, as on the SqueezeDSP page (index.html .sqdsp-support; Simon 2026-11-26): plain links,
+   never over the controls */
+.sqdsp-support { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin: 14px 0 10px 0; }
+.sqdsp-supportlink { padding: 6px 14px; border: 1px solid rgba(128, 128, 128, 0.45); border-radius: 4px; color: RoyalBlue;
+                     font-size: 0.92em; text-decoration: none; }
+.sqdsp-supportlink:hover, .sqdsp-supportlink:focus-visible { text-decoration: underline; }
+@media (prefers-color-scheme: dark) { .sqdsp-supportlink { color: #82b1ff; } }

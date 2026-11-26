@@ -72,7 +72,6 @@ function LocalUpdateSettings() {
 	myRadio = LocalSetupToggle('ReplayGain', replaceNull(SqueezeDSPData.Client.ReplayGain && SqueezeDSPData.Client.ReplayGain.enabled, 0));
     updateReplayGainToggle();
     
-    reStyleElement('btn_Apply', 'button-amber', 'button-blue');
     ListenForSlide();
 	GetLogSummary();
     // the engine's debug log (every player's), as the server holds it
@@ -725,10 +724,11 @@ function highlightMatchingOption(selectElementId, targetFullPath) {
                 displayNode.textContent = value;
             }
         } else {
+            // SqueezeDSP fork (2026-11-25): shown, not changed: no change event, whose onchange (NewFieldValue) now SAVES a
+            // choice at once (sqdsp_data.js LocalChanged): a redraw, Reset and a preset's load each saved the FIR again
             for (let i = 0; i < element.options.length; i++) {
                 if (element.options[i].value === value) {
-                    element.selectedIndex = i;
-                    element.dispatchEvent(new Event('change', { bubbles: true }));
+                    setSelectValue(element, value);
                     break;
                 }
             }
@@ -1026,10 +1026,9 @@ function LocalShowSpeed(st) {
 }
 
 // The new interface instead of this page (the user's choice of one, kept on the server: squeezedsp.interface), then
-// the new page for this player. Changes not applied yet: asked first, as leaving the page asks.
+// the new page for this player. Changes not saved yet (waiting for a Save): asked first, as leaving the page asks.
 function SqueezeDSPSwitchInterface(to) {
-    const apply = document.getElementById('btn_Apply');
-    if (apply && apply.classList.contains('button-amber') &&
+    if (sqdspWaiting() &&
         !confirm('You have unsaved changes. Press OK to leave without them and Cancel to go back.')) return;
     const btn = document.getElementById('btn_NewInterface');
     if (btn) btn.disabled = true;

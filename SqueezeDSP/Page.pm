@@ -93,6 +93,11 @@ my %LABELS = (
     dsdSourceUp    => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP',
     dsdSourceOwn   => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN',
     dsdSourceLeave => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE',
+    # what each choice does, on its own button (Simon 2026-11-25: "tool tips on the upsample DSD choices explaining what
+    # they do"); the row's help keeps the DSF caveat
+    dsdSourceUpHelp    => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP_HELP',
+    dsdSourceOwnHelp   => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN_HELP',
+    dsdSourceLeaveHelp => 'PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE_HELP',
     filterCd    => 'PLUGIN_SQUEEZEDSP_SRC_FILTER_CD',
     filterHiRes => 'PLUGIN_SQUEEZEDSP_SRC_FILTER_HIRES',
     # the filter family's names (0.1.72.44): the dropdown and the signal path's row
@@ -200,6 +205,12 @@ my %LABELS = (
     width       => 'PLUGIN_SQUEEZEDSP_WIDTH',
     widthHelp   => 'PLUGIN_SQUEEZEDSP_WIDTH_HELP',
     apply       => 'PLUGIN_SQUEEZEDSP_LIVE_APPLY',
+    # settings waiting to be saved, said plainly (Simon 2026-11-25: "the UI needs to feedback and say settings will be
+    # lost or save now"): beside the button while they wait, and in the page's own box when leaving
+    unsaved     => 'PLUGIN_SQUEEZEDSP_LIVE_UNSAVED',
+    leaveAsk    => 'PLUGIN_SQUEEZEDSP_LIVE_LEAVE_ASK',
+    dontSave    => 'PLUGIN_SQUEEZEDSP_LIVE_DONT_SAVE',
+    cancel      => 'PLUGIN_SQUEEZEDSP_LIVE_CANCEL',
     presets     => 'PLUGIN_SQUEEZEDSP_HTML_PRESETS',
     load        => 'PLUGIN_SQUEEZEDSP_LIVE_LOAD',
     saveAs      => 'PLUGIN_SQUEEZEDSP_LIVE_SAVE_AS',

@@ -43,8 +43,8 @@ function handleFileSelection(event) {
 }
 
 function handleUnsavedChanges(event) {
-    const applyButton = document.getElementById('btn_Apply');
-    if (applyButton?.classList.contains('button-amber')) {
+    // anything waiting for a Save (sqdsp_data.js)
+    if (typeof sqdspWaiting === 'function' && sqdspWaiting()) {
         event.preventDefault();
         event.returnValue = 'You have unsaved changes. Press Leave to exit and Cancel to go back.';
         return event.returnValue;

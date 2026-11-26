@@ -13,6 +13,15 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.65	Fork: the classic page fits a phone (it slid sideways): a clipping lamp's details open under the
+				Clipping row, across it; on a wider window under the lamp (above it, their top line was cut off).
+	0.1.72.64	Fork: the classic page's Ko-fi and Buy Me a Coffee links sit under everything, as on the SqueezeDSP
+				page (they floated over the controls, on a phone over Save).
+	0.1.72.63	Fork: Save beside what it saves, both pages: a red Save, with "Not saved", at the foot of the DSP tab,
+				under the PEQ bands and at the foot of Convolution; every other change saved at once (the classic
+				page's Apply is gone); Reset saves at once. The Filter guide opens in Material's frame; leaving the
+				SqueezeDSP page with settings not saved asks first; each DSD sources choice has its own help; the
+				players by name.
 	0.1.72.62	Fork: with the Sample Rate Converter on DSD, DSD sources per player: Upsample (to the DSD rate, as before),
 				Source rate (its own DSD rate, through the DSP) or Untouched (played as it is, no DSP). DSF files
 				supported; DFF and WavPack DSD files untested.
@@ -317,7 +326,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.62";
+my $revision = "0.1.72.65";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;

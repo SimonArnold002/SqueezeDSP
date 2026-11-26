@@ -302,7 +302,7 @@ function AddPEQBand() {
         SlopeType: slopeType
     });
     
-    reStyleElement('btn_Apply', 'button-blue', 'button-amber');
+    LocalChanged('Filters');
     rebuildPEQUI('peqContainer');
 }
 
@@ -312,7 +312,7 @@ function DelPEQBand() {
         client.Filters.pop();
         rebuildPEQUI('peqContainer');
     }
-    reStyleElement('btn_Apply', 'button-blue', 'button-amber');
+    LocalChanged('Filters');
 }
 
 function deleteFilterByIndex(index) {
@@ -322,7 +322,7 @@ function deleteFilterByIndex(index) {
         SqueezeDSPData.Client.Filters.splice(index, 1);
         rebuildPEQUI();
     }
-    reStyleElement('btn_Apply', 'button-blue', 'button-amber');
+    LocalChanged('Filters');
 }
 
 function rebuildPEQUI(containerId = 'peqContainer') {
@@ -383,7 +383,7 @@ function handleFilterTypeChange(radio, bandIndex) {
     }
     SqueezeDSPData.Client.Filters[bandIndex] = filter;
     rebuildPEQUI();
-    reStyleElement('btn_Apply', 'button-blue', 'button-amber');
+    LocalChanged('Filters');
 }
 
 function valInputDecimal(myElement) {    
@@ -420,7 +420,6 @@ function NewFieldValue(FieldName, myEl) {
     const path = FieldName.split('.');
     let current = SqueezeDSPData.Client;
     const lastIndex = path.length - 1;
-    reStyleElement('btn_Apply', 'button-blue', 'button-amber');
     // Special handling for Filters array - they have numeric indices
     if (path[0] === 'Filters' && path.length >= 2) {
         const filterIndex = parseInt(path[1]);
@@ -434,6 +433,7 @@ function NewFieldValue(FieldName, myEl) {
         if (property) {
             current.Filters[filterIndex][property] = convertValue(property, val);
         }
+        LocalChanged(FieldName);   // a band's value: waits for PEQ's Save
         return; // Exit early since we handled the Filters case
     }
     
@@ -445,6 +445,9 @@ function NewFieldValue(FieldName, myEl) {
     }
     // Set the final property value with type conversion
     current[path[lastIndex]] = convertValue(path[lastIndex], val);
+    // SqueezeDSP fork (2026-11-25): a slider's or a number box's value waits for its tab's Save; any other change is
+    // saved at once (sqdsp_data.js LocalChanged), as on the SqueezeDSP page
+    LocalChanged(FieldName);
 }
 
 function GetCurrentPlayerSettings() {

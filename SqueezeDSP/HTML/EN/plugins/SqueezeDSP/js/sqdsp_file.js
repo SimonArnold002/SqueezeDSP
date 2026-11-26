@@ -2,7 +2,7 @@
 File Import and Processing
 -----------------------------------------------------*/
 
-// A REW / AutoEQ filter file: its bands and preamp replace the player's, waiting for Apply. SqueezeDSP fork (0.1.72.57,
+// A REW / AutoEQ filter file: its bands and preamp replace the player's, waiting for Save (PEQ's, and DSP's for the preamp). SqueezeDSP fork (0.1.72.57,
 // Simon 2026-11-20): read by parseEQText (sqdsp_peq_lib.js, shared with the new page), so a shelf keeps its own Q, and
 // the other DSP settings (FIR, crossfeed, loudness, ReplayGain, delay, balance, width) stay: Fox's import reset them all
 // first (LocalClearSettings). A file with no Preamp line sets the preamp to 0, as that reset did.
@@ -11,7 +11,8 @@ function ProcessREW(EQText) {
     SqueezeDSPData.Client.Filters = parsed.filters;
     SqueezeDSPData.Client.Preamp = parsed.preamp === null ? 0 : parsed.preamp;
     LocalUpdateSettings();
-    reStyleElement('btn_Apply', 'button-blue', 'button-amber');
+    LocalChanged('Filters');
+    LocalChanged('Preamp');
 }
 
 function ConfirmREW(EQText) {

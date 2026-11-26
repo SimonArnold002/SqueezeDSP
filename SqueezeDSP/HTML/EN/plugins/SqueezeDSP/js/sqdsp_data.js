@@ -482,6 +482,8 @@ function SqueezeDSPFetchCurrentSettings(callback) {
 
                 // Transform any legacy filter format
                 SqueezeDSPData = transformLegacyFilters(SqueezeDSPData);
+                // what was read is what is stored: a change saved at once goes from this (LocalSaveField)
+                LocalStoredFromPage();
 
                 // If fresh player: defaults are now in place, persist them immediately
                 if (isFreshPlayer) {
@@ -561,39 +563,141 @@ function SqueezeDSPFetchPresetSettings(presetFilePath, callback) {
     });
 }
 
-function SqueezeDSPSaveAll(callback) {
+/* ---------------------------------------------------------------------------------------------------------------------
+   SAVE BESIDE WHAT IT SAVES (SqueezeDSP fork, Simon 2026-11-25: "change the classic it needs to follow suit", the
+   SqueezeDSP page's way: "call it Save in Red if it needs saving, next to the areas that it applies to rather than at top
+   the others all save with buttons"; "reset should reset it should not need a save"). The sliders, their number boxes and
+   the PEQ bands wait for the red Save at the foot of their own tab (DSP; PEQ, under its bands; Convolution), because
+   every save reopens a playing track; every other change (a switch, a choice, a dropdown) is saved at once, from what is
+   stored plus that one change, so nothing waiting goes with it. Fox's one Apply (every change waited for it) is gone.
+   SQDSP_STORED: the player's settings as last read or sent; SQDSP_WAITING: path -> the tab whose Save it waits for
+   ('top': a save that failed, its Save beside Reset).
+   --------------------------------------------------------------------------------------------------------------------- */
+var SQDSP_STORED = null;
+var SQDSP_WAITING = {};
+const SQDSP_WAIT_TAB = { 'Preamp': 'dsp', 'ReplayGain.fixed_gain': 'dsp', 'ReplayGain.spotify_gain': 'dsp', 'Delay.delay': 'dsp',
+                         'Balance': 'dsp', 'Width': 'dsp', 'Loudness.listening_level': 'dsp', 'FIRStrength': 'conv' };
+// written without a save of its own: the preset's name, which goes with the preset's own save (Load and Save save it all)
+const SQDSP_QUIET = ['Last_preset'];
 
- 	
-    new Ajax.Request('/jsonrpc.js', {
-        method: 'post',
-        postBody: Object.toJSON({
-            id: 1,
-            method: 'slim.request',
-            params: [
-                getCurrentPlayer(),
-                [
-                    'squeezedsp.saveall',
-                    'val:' + JSON.stringify(SqueezeDSPData)  // Send the JSON string
-                ]
-            ]
-        }),
-		onSuccess: (response) => {
-            // Just check for done status, no result content
-            const data = response.responseText.evalJSON();
-            if (data.result && data.result._done) {
-                if (callback) callback(true);
-            } else {
-                console.error('Save failed:', data);
-                if (callback) callback(false, data.error);
-            }
-            reStyleElement('btn_Apply', 'button-amber', 'button-blue');
-        },
-        onFailure: (response) => {
-            console.error('Save failed', response.status, response.statusText);
-            if (callback) callback(false, response.statusText);
-            reStyleElement('btn_Apply', 'button-amber', 'button-red');
-        }
+function sqdspClone(o) { return o === undefined ? undefined : JSON.parse(JSON.stringify(o)); }
+function sqdspWaitTab(path) { return /^Filters(\.|$)/.test(path) ? 'peq' : (SQDSP_WAIT_TAB[path] || null); }
+function sqdspWaiting() { return Object.keys(SQDSP_WAITING).length > 0; }
+
+// what the page has just read is what is stored: nothing waits
+function LocalStoredFromPage() {
+    SQDSP_STORED = sqdspClone(SqueezeDSPData.Client || {});
+    SQDSP_WAITING = {};
+    LocalRenderSave();
+}
+
+// a change made on the page (NewFieldValue, a band, an import): it waits for its tab's Save, or is saved at once
+function LocalChanged(path) {
+    if (SQDSP_QUIET.indexOf(path) >= 0) return;
+    const tab = sqdspWaitTab(path);
+    if (tab) {
+        SQDSP_WAITING[path] = tab;
+        LocalRenderSave();
+        return;
+    }
+    LocalSaveField(path);
+}
+
+// a switch or a choice: what is stored, with this one change, saved at once
+function LocalSaveField(path) {
+    if (!SQDSP_STORED) { SqueezeDSPSaveAll(); return; }   // nothing read yet: all of it, as before
+    const keys = path.split('.');
+    let src = SqueezeDSPData.Client, dst = SQDSP_STORED;
+    for (let i = 0; i < keys.length - 1; i++) {
+        src = src ? src[keys[i]] : undefined;
+        if (dst[keys[i]] === null || typeof dst[keys[i]] !== 'object') dst[keys[i]] = {};
+        dst = dst[keys[i]];
+    }
+    const last = keys[keys.length - 1];
+    if (src && src[last] !== undefined) dst[last] = sqdspClone(src[last]);
+    else delete dst[last];
+    SqueezeDSPSaveAll(null, SQDSP_STORED);
+}
+
+// each Save row shown only while something of its own tab waits; its button usable only then
+function LocalRenderSave() {
+    const want = {};
+    Object.keys(SQDSP_WAITING).forEach(function (k) { want[SQDSP_WAITING[k]] = true; });
+    document.querySelectorAll('.sqdsp-saverow').forEach(function (r) {
+        const on = !!want[r.dataset.area];
+        r.style.display = on ? '' : 'none';
+        const b = r.querySelector('button');
+        if (b) b.disabled = !on;
     });
+}
+
+// one save at a time, in the order asked: a later one is never overtaken by an earlier (the SqueezeDSP page's queue)
+var SQDSP_SAVES = [], SQDSP_SAVING = false;
+function sqdspNextSave() {
+    if (SQDSP_SAVING || !SQDSP_SAVES.length) return;
+    SQDSP_SAVING = true;
+    SQDSP_SAVES.shift()(function () { SQDSP_SAVING = false; sqdspNextSave(); });
+}
+
+// The player's settings saved (squeezedsp.saveall). With no client: everything the page shows (a Save, Reset, a preset),
+// so nothing waits after it; with one (LocalSaveField): that. What is sent is taken now. A save that fails puts back what
+// waited and shows "Not saved" with a Save beside Reset (the save then takes everything the page shows).
+function SqueezeDSPSaveAll(callback, client) {
+    const full = !client;
+    const sent = sqdspClone(client || SqueezeDSPData.Client || {});
+    const was = full ? SQDSP_WAITING : {};
+    if (full) {
+        SQDSP_WAITING = {};
+        SQDSP_STORED = sqdspClone(sent);
+        LocalRenderSave();
+    }
+    const body = Object.toJSON({
+        id: 1,
+        method: 'slim.request',
+        params: [getCurrentPlayer(), ['squeezedsp.saveall', 'val:' + JSON.stringify(Object.assign({}, SqueezeDSPData, { Client: sent }))]]
+    });
+    function failed() {
+        Object.keys(was).forEach(function (k) { if (!(k in SQDSP_WAITING)) SQDSP_WAITING[k] = was[k]; });
+        SQDSP_WAITING['*'] = 'top';
+        LocalRenderSave();
+    }
+    SQDSP_SAVES.push(function (done) {
+        // once per save, whatever answers: the queue moves on before the caller's callback (which may throw) is told
+        let over = false;
+        function finish(ok, why) {
+            if (over) return;
+            over = true;
+            if (!ok) failed();
+            done();
+            if (typeof callback === 'function') {
+                try { callback(ok, why); } catch (e) { console.error('Save callback failed', e); }
+            }
+        }
+        new Ajax.Request('/jsonrpc.js', {
+            method: 'post',
+            postBody: body,
+            onSuccess: (response) => {
+                // Just check for done status, no result content
+                let data = null;
+                try { data = response.responseText.evalJSON(); } catch (e) { data = null; }
+                if (data && data.result && data.result._done) {
+                    finish(true);
+                } else {
+                    console.error('Save failed:', data);
+                    finish(false, data && data.error);
+                }
+            },
+            onFailure: (response) => {
+                console.error('Save failed', response.status, response.statusText);
+                finish(false, response.statusText);
+            },
+            onException: (request, e) => {
+                console.error('Save failed', e);
+                finish(false, String(e));
+            }
+        });
+    });
+    sqdspNextSave();
 }
 
 

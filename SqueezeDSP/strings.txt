@@ -168,16 +168,25 @@ PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE
 	EN	DSD sources
 
 PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_HELP
-	EN	Upsample: a DSD file goes to the DSD rate above, through the DSP. Source rate: it keeps its own DSD rate, through the DSP. Untouched: it plays as it is, with no DSP. Fully supported for DSF files; DFF and WavPack DSD files are untested.
+	EN	Fully supported for DSF files; DFF and WavPack DSD files are untested.
 
 PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP
 	EN	Upsample
 
+PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_UP_HELP
+	EN	A DSD file goes to the DSD rate chosen above, through the DSP and our modulator.
+
 PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN
 	EN	Source rate
 
+PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_OWN_HELP
+	EN	A DSD file keeps its own DSD rate, through the DSP and our modulator; it is decoded and re-modulated even with every DSP function off.
+
 PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE
 	EN	Untouched
+
+PLUGIN_SQUEEZEDSP_SRC_DSD_SOURCE_LEAVE_HELP
+	EN	A DSD file plays as it would with SqueezeDSP off: no DSP, no decoding, no modulator.
 
 PLUGIN_SQUEEZEDSP_SRC_FILTER_CD
 	EN	Filter, 44.1/48 kHz sources
@@ -627,7 +636,19 @@ PLUGIN_SQUEEZEDSP_LIVE_STEEP
 	EN	Steep (Chebyshev)
 
 PLUGIN_SQUEEZEDSP_LIVE_APPLY
-	EN	Apply
+	EN	Save
+
+PLUGIN_SQUEEZEDSP_LIVE_UNSAVED
+	EN	Not saved: settings will be lost unless you save now.
+
+PLUGIN_SQUEEZEDSP_LIVE_LEAVE_ASK
+	EN	Your settings are not saved and will be lost.
+
+PLUGIN_SQUEEZEDSP_LIVE_DONT_SAVE
+	EN	Don't save
+
+PLUGIN_SQUEEZEDSP_LIVE_CANCEL
+	EN	Cancel
 
 PLUGIN_SQUEEZEDSP_LIVE_LOAD
 	EN	Load

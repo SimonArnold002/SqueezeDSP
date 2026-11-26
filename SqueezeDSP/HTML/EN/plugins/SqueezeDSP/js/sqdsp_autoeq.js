@@ -317,7 +317,7 @@ function hideDropdown(dropdown) {
 
 // SqueezeDSP fork (0.1.72.57): the files fetched by name (AutoEQIndex.fetchBest, no GitHub API call unless they are
 // not there); a FIR WAV is imported and then selected for the player (Simon 2026-11-20: loading it in place of the FIR
-// there "is to be expected"), waiting for Apply as every change on this page does; a ParametricEQ.txt goes through the
+// there "is to be expected"), saved at once as any choice is (2026-11-25); a ParametricEQ.txt goes through the
 // file import (ConfirmREW)
 function handleAutoEQSelection(entry, statusSpan) {
     const log = function (msg) {

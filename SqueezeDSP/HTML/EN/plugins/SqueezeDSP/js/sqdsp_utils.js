@@ -58,8 +58,15 @@ function LocalClearSettings() {
     LocalUpdateSettings();
     highlightMatchingOption('sel_FIRWavFile', 'None');
     highlightMatchingOption('sel_Preset', 'None');
-    reStyleElement('btn_Apply', 'button-blue', 'button-amber');
     reStyleElement('btn_LoadPreset', 'button-amber', 'button-teal');
+}
+
+// The Reset button (Simon 2026-11-25: "reset should reset it should not need a save"): every DSP setting back to a new
+// player's (LocalClearSettings, which a preset's load also uses, so it saves nothing itself) and SAVED AT ONCE, as the
+// SqueezeDSP page's Reset; anything else waiting goes in the same save
+function LocalResetSettings() {
+    LocalClearSettings();
+    SqueezeDSPSaveAll();
 }
 
 function SwitchCheckbox(myElement, InvertToggle = false) {
