@@ -13,6 +13,8 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.66	Fork: the Material entry is in the player menus only (locked): no longer in the menu of every
+				streaming or app album, artist and track.
 	0.1.72.65	Fork: the classic page fits a phone (it slid sideways): a clipping lamp's details open under the
 				Clipping row, across it; on a wider window under the lamp (above it, their top line was cut off).
 	0.1.72.64	Fork: the classic page's Ko-fi and Buy Me a Coffee links sit under everything, as on the SqueezeDSP
@@ -326,7 +328,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.65";
+my $revision = "0.1.72.66";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
@@ -488,6 +490,15 @@ sub initPlugin {
 # Registered whichever interface is chosen (0.1.72.58; Simon 2026-11-20: the classic page "shows as a player setting as
 # it does now"): this address opens the one chosen, the classic page for that player inside Material (Page.pm sends it
 # there) or the new page, so a change of interface needs no new entry.
+# LOCKED, so it is in the player menus only (Simon 2026-11-27: "they should not show in context menus ...
+# I still want them to show under players as they do now"). Material adds 'allplayers' to every section outside
+# NO_ALL_PLAYER_ACTIONS, so an unlocked entry also showed in the menu of every streaming or app album, artist and track
+# and on an app page's toolbar (browse-resp.js; its ignoreAllPlayerActions drops only a LOCKED entry). A locked entry
+# is skipped unless the caller asks for locked ones, and only the player menus do (Manage players, player settings, the
+# main menu's player list), with unlockAll: true unless Material's settings password is set and not entered. Home asks
+# for none either, so a new browser gets no tile; one already in a browser's Home list stays until unpinned. Material
+# 6.5.0 lets no plugin add a Home tile ('pinned' is read from customactions.json only, af84375db). Run in
+# JavaScriptCore against 6.5.0's own code from the rig, 2026-11-27.
 my $materialDone;
 sub postinitPlugin {
     return if $materialDone;
@@ -499,6 +510,7 @@ sub postinitPlugin {
             title  => Slim::Utils::Strings::string('PLUGIN_SQUEEZEDSP_DISPLAYNAME'),
             iframe => Plugins::SqueezeDSP::Page::PATH() . '?player=$ID',
             icon   => 'equalizer',
+            locked => 1,
         } );
         1;
     };
