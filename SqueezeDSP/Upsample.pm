@@ -85,6 +85,10 @@ my @FILTERS = (
     'nonring',
 );
 sub filterNames { return @FILTERS }
+# a pair as the engine's --upfilter takes it, "<CD>,<hi-res>", each name one of @FILTERS, built from the list itself so a
+# new name is never refused (0.1.72.52's int80 and int70, first committed with 0.1.72.55, carry digits, which a
+# letters-and-hyphens check had refused, both filters then the defaults; ledger `THE D RULE DROPS AN INT80 OR INT70 FILTER`)
+my $PAIR = do { my $n = join '|', map { quotemeta } @FILTERS; qr/^(?:$n),(?:$n)$/ };
 use constant DEFAULT_FILTER_CD    => 'short-int';
 use constant DEFAULT_FILTER_HIRES => 'short-lin';
 
@@ -303,7 +307,7 @@ sub _tokenize {
     # placeholder
     if ( defined $command && index( $command, DFILTER ) >= 0 ) {
         my $f = eval { pcmFilters( Plugins::SqueezeDSP::Configuration::clientPrefs( Slim::Player::Client::getClient( $_[0]->{clientid} ) ) ) };
-        $f = DEFAULT_FILTER_CD . ',' . DEFAULT_FILTER_HIRES unless defined $f && $f =~ /^[a-z-]+,[a-z-]+$/;
+        $f = DEFAULT_FILTER_CD . ',' . DEFAULT_FILTER_HIRES unless defined $f && $f =~ $PAIR;
         my $d = DFILTER;
         $command =~ s/\Q$d\E/$f/g;
     }

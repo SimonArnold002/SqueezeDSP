@@ -13,6 +13,9 @@ package Plugins::SqueezeDSP::Plugin;
 	#
 	#
 	#
+	0.1.72.68	Fork: as 0.1.72.67, only a comment corrected (0.1.72.67 was built, never installed).
+	0.1.72.67	Fork: a track above the player's max rate with the Sample Rate Converter off keeps the player's PCM
+				filters when one is an Intermediate 80% or 70% (both had gone back to the defaults).
 	0.1.72.66	Fork: the Material entry is in the player menus only (locked): no longer in the menu of every
 				streaming or app album, artist and track.
 	0.1.72.65	Fork: the classic page fits a phone (it slid sideways): a clipping lamp's details open under the
@@ -328,7 +331,7 @@ our (
 
 
 # Revision number
-my $revision = "0.1.72.66";
+my $revision = "0.1.72.68";
 $binversion = "0_2_40";
 use vars qw($VERSION);
 $VERSION = $revision;
